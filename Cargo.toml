@@ -2,5 +2,12 @@
 name = "merkle-tree"
 version = "0.1.0"
 edition = "2021"
+authors = ["HM Sibghat Ullah <h.m.sibghatullah1997@gmail.com>"]
+license = "MIT"
+description = "Educational Rust library implementing a SHA-256 Merkle tree with inclusion proofs."
+repository = ""
+keywords = ["merkle", "sha256", "proofs", "cryptography"]
+categories = ["cryptography", "data-structures"]
 
 [dependencies]
+sha2 = "0.10"
