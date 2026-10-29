@@ -79,7 +79,7 @@ impl MerkleTree {
         I: IntoIterator<Item = T>,
         T: AsRef<[u8]>,
     {
-        let mut leaf_hashes: Vec<[u8; 32]> =
+        let leaf_hashes: Vec<[u8; 32]> =
             leaves.into_iter().map(|x| hash_leaf(x.as_ref())).collect();
         let mut layers = Vec::new();
         if leaf_hashes.is_empty() {
@@ -165,7 +165,12 @@ mod tests {
     use super::*;
 
     fn to_hex(bytes: &[u8]) -> String {
-        bytes.iter().map(|b| format!("{:02x}", b)).collect::<String>()
+        use std::fmt::Write as _;
+        let mut s = String::with_capacity(bytes.len() * 2);
+        for b in bytes {
+            write!(&mut s, "{:02x}", b).expect("write! to String never fails");
+        }
+        s
     }
 
     #[test]
