@@ -32,6 +32,16 @@ use sha2::{Digest, Sha256};
 const LEAF_PREFIX: u8 = 0x00;
 const NODE_PREFIX: u8 = 0x01;
 
+/// Encode bytes as lowercase hex string.
+pub fn to_hex(bytes: &[u8]) -> String {
+    hex::encode(bytes)
+}
+
+/// Encode a 32-byte array as lowercase hex string.
+pub fn to_hex32(bytes: &[u8; 32]) -> String {
+    hex::encode(bytes)
+}
+
 /// Compute a leaf hash as H(0x00 || data).
 pub fn hash_leaf(data: &[u8]) -> [u8; 32] {
     let mut hasher = Sha256::new();
@@ -136,6 +146,11 @@ impl MerkleTree {
     /// Root hash of the tree. Returns None for an empty tree.
     pub fn root(&self) -> Option<[u8; 32]> {
         self.layers.last().and_then(|l| l.first().cloned())
+    }
+
+    /// Root hash formatted as lowercase hex. Returns None for an empty tree.
+    pub fn root_hex(&self) -> Option<String> {
+        self.root().map(|r| to_hex32(&r))
     }
 
     /// Return the hashed leaf at index, if present.
