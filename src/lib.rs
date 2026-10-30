@@ -1,5 +1,26 @@
 //! merkle-tree: Educational SHA-256 Merkle tree with inclusion proofs.
 //!
+//! This crate provides a small, easy-to-read Merkle tree implementation with
+//! explicit domain separation and a clear API for building trees and verifying
+//! inclusion proofs.
+//!
+//! Quickstart:
+//!
+//! ```
+//! use merkle_tree::{verify_inclusion, MerkleTree};
+//!
+//! let leaves = [b"a".as_ref(), b"b", b"c", b"d"];
+//! let tree = MerkleTree::from_leaves(leaves);
+//! let root = tree.root().expect("root");
+//!
+//! // Create and verify a proof for the leaf at index 2 ("c")
+//! let proof = tree.prove(2).expect("proof");
+//! assert!(proof.verify(root));
+//!
+//! // Or verify using the free function with raw leaf data:
+//! assert!(verify_inclusion(b"c", &proof.steps, root));
+//! ```
+//!
 //! Design choices:
 //! - Leaf hash: H(0x00 || data)
 //! - Internal node hash: H(0x01 || left || right)
@@ -94,7 +115,11 @@ impl MerkleTree {
             let mut i = 0;
             while i < prev.len() {
                 let left = prev[i];
-                let right = if i + 1 < prev.len() { prev[i + 1] } else { prev[i] };
+                let right = if i + 1 < prev.len() {
+                    prev[i + 1]
+                } else {
+                    prev[i]
+                };
                 next.push(hash_nodes(&left, &right));
                 i += 2;
             }
