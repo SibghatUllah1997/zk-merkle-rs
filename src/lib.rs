@@ -94,6 +94,42 @@ impl InclusionProof {
         }
         acc == expected_root
     }
+
+    /// Leaf hash as lowercase hex.
+    pub fn leaf_hex(&self) -> String {
+        to_hex32(&self.leaf_hash)
+    }
+
+    /// Steps rendered as `Vec<(side, hex)>`, where side is `"L"` or `"R"`.
+    pub fn steps_hex(&self) -> Vec<(char, String)> {
+        self.steps
+            .iter()
+            .map(|s| {
+                let side = match s.side {
+                    SiblingSide::Left => 'L',
+                    SiblingSide::Right => 'R',
+                };
+                (side, to_hex32(&s.sibling))
+            })
+            .collect()
+    }
+}
+
+impl core::fmt::Display for InclusionProof {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "leaf={}, steps=[", to_hex32(&self.leaf_hash))?;
+        for (i, step) in self.steps.iter().enumerate() {
+            let side = match step.side {
+                SiblingSide::Left => 'L',
+                SiblingSide::Right => 'R',
+            };
+            write!(f, "{}:{}", side, to_hex32(&step.sibling))?;
+            if i + 1 != self.steps.len() {
+                write!(f, ", ")?;
+            }
+        }
+        write!(f, "]")
+    }
 }
 
 /// A Merkle tree built using SHA-256 with explicit domain separation.
@@ -203,9 +239,10 @@ pub fn verify_inclusion(leaf_data: &[u8], steps: &[ProofStep], expected_root: [u
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fmt::Write as _;
 
+    // Local helper retained for regression sanity.
     fn to_hex(bytes: &[u8]) -> String {
-        use std::fmt::Write as _;
         let mut s = String::with_capacity(bytes.len() * 2);
         for b in bytes {
             write!(&mut s, "{:02x}", b).expect("write! to String never fails");
@@ -238,5 +275,25 @@ mod tests {
         assert!(proof2.verify(root));
         // Verify via helper using raw data
         assert!(verify_inclusion(b"c", &proof2.steps, root));
+    }
+
+    #[test]
+    fn inclusion_proof_display_and_hex_helpers() {
+        let tree = MerkleTree::from_leaves(["a", "b", "c"].map(|s| s.as_bytes()));
+        let root_hex = tree.root_hex().expect("root hex");
+        assert_eq!(root_hex.len(), 64);
+        let proof = tree.prove(1).expect("proof for index 1");
+        // Check leaf_hex and steps_hex
+        let leaf_hex = proof.leaf_hex();
+        assert_eq!(leaf_hex.len(), 64);
+        let steps_hex = proof.steps_hex();
+        assert!(!steps_hex.is_empty());
+        for (side, h) in steps_hex {
+            assert!(side == 'L' || side == 'R');
+            assert_eq!(h.len(), 64);
+        }
+        // Display should include leaf= and steps=[
+        let s = proof.to_string();
+        assert!(s.contains("leaf=") && s.contains("steps=["));
     }
 }
