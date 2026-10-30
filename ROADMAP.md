@@ -3,8 +3,8 @@
 This project will evolve from a simple educational Merkle tree to a more featureful library with zk-friendly hash options and tooling.
 
 1. Initialize crate, README, LICENSE, CI, basic SHA-256 tree
-2. Add API docs and crate-level docs with examples
-3. Add hex/Display helpers for roots and proofs
+2. Add API docs and crate-level docs with examples [x]
+3. Add hex/Display helpers for roots and proofs [x]
 4. Benchmarks: build and proof generation microbench (criterion)
 5. Validate odd-leaf padding choices and document alternatives
 6. Add optional leaf indexing and metadata helpers
