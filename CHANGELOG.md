@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-10-30
+
+- Add crate-level docs with a quickstart doctest and formatting cleanups
+- Introduce hex helpers and `root_hex()` for formatted roots
+- Implement `Display` for inclusion proofs and add hex-oriented proof helpers
+
 ## Day 1
 
 - Initialize Rust library crate: `merkle-tree`
