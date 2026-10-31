@@ -5,8 +5,8 @@ This project will evolve from a simple educational Merkle tree to a more feature
 1. Initialize crate, README, LICENSE, CI, basic SHA-256 tree
 2. Add API docs and crate-level docs with examples [x]
 3. Add hex/Display helpers for roots and proofs [x]
-4. Benchmarks: build and proof generation microbench (criterion)
-5. Validate odd-leaf padding choices and document alternatives
+4. Benchmarks: build and proof generation microbench (criterion) [x]
+5. Validate odd-leaf padding choices and document alternatives [x]
 6. Add optional leaf indexing and metadata helpers
 7. Add serde (optional) for proofs and roots
 8. Add no_std (alloc) support feature-flag
