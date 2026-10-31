@@ -24,7 +24,8 @@
 //! Design choices:
 //! - Leaf hash: H(0x00 || data)
 //! - Internal node hash: H(0x01 || left || right)
-//! - Odd layers are padded by duplicating the last element
+//! - Odd layers are padded by duplicating the last element (except a single-leaf
+//!   tree, whose root is exactly the leaf hash)
 //! - Hash function: sha2::Sha256 (audited crate; no hand-rolled crypto)
 
 use sha2::{Digest, Sha256};

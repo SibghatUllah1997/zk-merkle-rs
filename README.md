@@ -14,6 +14,7 @@ Important: This crate is educational. Do not use it for production security-crit
   - Leaf hash: H(0x00 || data)
   - Internal node hash: H(0x01 || left || right)
   - Odd layers are padded by duplicating the last element
+  - Single-leaf trees use the leaf hash directly as the root (no extra padding)
 
 ## Quickstart
 
@@ -31,6 +32,20 @@ assert!(proof.verify(root));
 // Or verify with the helper using raw leaf data:
 assert!(verify_inclusion(b\"c\", &proof.steps, root));
 ```
+
+## Odd-leaf padding
+
+This library pads odd layers by duplicating the last element. For example, with three leaves
+`[a, b, c]`, the bottom layer pairs as `(a, b)` and `(c, c)`. For a single-leaf tree, the
+root is exactly the leaf hash (we do not introduce a synthetic parent).
+
+Alternative padding choices (not implemented here) include:
+- Using a domain-separated zero-hash sentinel for missing siblings
+- Padding the bottom layer up to the next power of two
+- Omitting incomplete pairs (not recommended; ambiguous)
+
+Duplicating the last element keeps proofs simple and interoperable with common Merkle designs,
+while our explicit domain separation prevents cross-level collisions.
 
 ## Roadmap
 
