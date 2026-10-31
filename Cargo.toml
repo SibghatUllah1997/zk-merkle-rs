@@ -12,3 +12,9 @@ categories = ["cryptography", "data-structures"]
 [dependencies]
 sha2 = "0.10"
 hex = "0.4"
+
+[dev-dependencies]
+
+[[bench]]
+name = "merkle_build"
+harness = false
