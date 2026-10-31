@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-31
+
+- Add harness-free microbench to time tree build and proof steps
+- Validate and document odd-leaf padding; note common alternative strategies
+
 ## 2026-10-30
 
 - Add crate-level docs with a quickstart doctest and formatting cleanups
