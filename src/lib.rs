@@ -144,6 +144,29 @@ pub struct LeafInfo {
     pub hash: [u8; 32],
 }
 
+/// Newtype wrapper for a Merkle root hash (32 bytes).
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct MerkleRoot(pub [u8; 32]);
+
+impl MerkleRoot {
+    /// Borrow the underlying bytes.
+    pub fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+
+    /// Hex-encode the root as a lowercase string.
+    pub fn to_hex(&self) -> String {
+        to_hex32(&self.0)
+    }
+}
+
+impl core::fmt::Display for MerkleRoot {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}", self.to_hex())
+    }
+}
+
 /// Inclusion proof carrying the original leaf index as metadata.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -219,6 +242,11 @@ impl MerkleTree {
     /// Root hash of the tree. Returns None for an empty tree.
     pub fn root(&self) -> Option<[u8; 32]> {
         self.layers.last().and_then(|l| l.first().cloned())
+    }
+
+    /// Root hash wrapped in `MerkleRoot`. Returns None for an empty tree.
+    pub fn root_typed(&self) -> Option<MerkleRoot> {
+        self.root().map(MerkleRoot)
     }
 
     /// Root hash formatted as lowercase hex. Returns None for an empty tree.
@@ -403,5 +431,15 @@ mod tests {
         // convenience methods
         assert_eq!(ip.leaf_hex().len(), 64);
         assert_eq!(ip.steps().len(), ip.proof.steps.len());
+    }
+
+    #[test]
+    fn merkle_root_newtype_hex_and_bytes() {
+        let tree = MerkleTree::from_leaves(["a", "b", "c"].map(|s| s.as_bytes()));
+        let raw = tree.root().expect("root");
+        let typed = tree.root_typed().expect("typed root");
+        assert_eq!(raw, *typed.as_bytes());
+        assert_eq!(typed.to_hex(), to_hex32(&raw));
+        assert_eq!(typed.to_string(), to_hex32(&raw));
     }
 }
