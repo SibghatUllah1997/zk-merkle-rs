@@ -61,6 +61,7 @@ pub fn hash_nodes(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
 }
 
 /// Direction of a sibling node in a proof step.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SiblingSide {
     Left,
@@ -68,6 +69,7 @@ pub enum SiblingSide {
 }
 
 /// One step of an inclusion proof path: the sibling hash and its side.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProofStep {
     pub sibling: [u8; 32],
@@ -75,6 +77,7 @@ pub struct ProofStep {
 }
 
 /// Inclusion proof for a specific leaf.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InclusionProof {
     /// Hash of the original leaf data: H(0x00 || data)
@@ -134,6 +137,7 @@ impl core::fmt::Display for InclusionProof {
 }
 
 /// Minimal per-leaf metadata: the leaf's index and its hashed value.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LeafInfo {
     pub index: usize,
@@ -141,6 +145,7 @@ pub struct LeafInfo {
 }
 
 /// Inclusion proof carrying the original leaf index as metadata.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IndexedInclusionProof {
     pub index: usize,
