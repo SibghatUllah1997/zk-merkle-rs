@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-11-01
+
+- Add leaf metadata helpers (LeafInfo) and indexed inclusion proofs
+- Introduce optional serde support for proofs and a typed MerkleRoot wrapper
+
 ## 2026-10-31
 
 - Add harness-free microbench to time tree build and proof steps

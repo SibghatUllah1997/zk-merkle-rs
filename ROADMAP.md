@@ -7,8 +7,8 @@ This project will evolve from a simple educational Merkle tree to a more feature
 3. Add hex/Display helpers for roots and proofs [x]
 4. Benchmarks: build and proof generation microbench (criterion) [x]
 5. Validate odd-leaf padding choices and document alternatives [x]
-6. Add optional leaf indexing and metadata helpers
-7. Add serde (optional) for proofs and roots
+6. Add optional leaf indexing and metadata helpers [x]
+7. Add serde (optional) for proofs and roots [x]
 8. Add no_std (alloc) support feature-flag
 9. Add `TryFrom` and safe conversions for byte arrays
 10. Add a simple CLI demo (build tree, print root, verify proof)
