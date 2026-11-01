@@ -133,6 +133,13 @@ impl core::fmt::Display for InclusionProof {
     }
 }
 
+/// Minimal per-leaf metadata: the leaf's index and its hashed value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LeafInfo {
+    pub index: usize,
+    pub hash: [u8; 32],
+}
+
 /// A Merkle tree built using SHA-256 with explicit domain separation.
 #[derive(Debug, Clone)]
 pub struct MerkleTree {
@@ -193,6 +200,33 @@ impl MerkleTree {
     /// Return the hashed leaf at index, if present.
     pub fn leaf_hash_at(&self, index: usize) -> Option<[u8; 32]> {
         self.layers.first().and_then(|l| l.get(index).cloned())
+    }
+
+    /// Return leaf metadata (index + hash) at `index`, if present.
+    pub fn leaf_info(&self, index: usize) -> Option<LeafInfo> {
+        self.leaf_hash_at(index)
+            .map(|hash| LeafInfo { index, hash })
+    }
+
+    /// Return metadata for all leaves (index + hash).
+    pub fn leaf_infos(&self) -> Vec<LeafInfo> {
+        match self.layers.first() {
+            Some(layer0) => layer0
+                .iter()
+                .cloned()
+                .enumerate()
+                .map(|(index, hash)| LeafInfo { index, hash })
+                .collect(),
+            None => Vec::new(),
+        }
+    }
+
+    /// Convenience: leaf infos rendered as `(index, hex_hash)` tuples.
+    pub fn leaf_infos_hex(&self) -> Vec<(usize, String)> {
+        self.leaf_infos()
+            .into_iter()
+            .map(|li| (li.index, to_hex32(&li.hash)))
+            .collect()
     }
 
     /// Generate an inclusion proof for the leaf at `index`.
@@ -296,5 +330,30 @@ mod tests {
         // Display should include leaf= and steps=[
         let s = proof.to_string();
         assert!(s.contains("leaf=") && s.contains("steps=["));
+    }
+
+    #[test]
+    fn leaf_info_helpers_return_expected_metadata() {
+        let tree = MerkleTree::from_leaves(["a", "b", "c", "d"].map(|s| s.as_bytes()));
+        // leaf_info
+        let li2 = tree.leaf_info(2).expect("leaf info at 2");
+        assert_eq!(li2.index, 2);
+        assert_eq!(li2.hash, hash_leaf(b"c"));
+        assert!(tree.leaf_info(99).is_none());
+        // leaf_infos (all)
+        let all = tree.leaf_infos();
+        assert_eq!(all.len(), 4);
+        assert_eq!(all[0].index, 0);
+        assert_eq!(all[0].hash, hash_leaf(b"a"));
+        assert_eq!(all[3].index, 3);
+        assert_eq!(all[3].hash, hash_leaf(b"d"));
+        // hex helpers
+        let hexes = tree.leaf_infos_hex();
+        assert_eq!(hexes.len(), 4);
+        // hex strings should be 64 chars
+        for (i, h) in hexes {
+            assert!(i < 4);
+            assert_eq!(h.len(), 64);
+        }
     }
 }
