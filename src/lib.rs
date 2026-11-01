@@ -140,6 +140,30 @@ pub struct LeafInfo {
     pub hash: [u8; 32],
 }
 
+/// Inclusion proof carrying the original leaf index as metadata.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IndexedInclusionProof {
+    pub index: usize,
+    pub proof: InclusionProof,
+}
+
+impl IndexedInclusionProof {
+    /// Verify this proof against an expected root.
+    pub fn verify(&self, expected_root: [u8; 32]) -> bool {
+        self.proof.verify(expected_root)
+    }
+
+    /// Leaf hash as lowercase hex.
+    pub fn leaf_hex(&self) -> String {
+        self.proof.leaf_hex()
+    }
+
+    /// Borrow the ordered proof steps.
+    pub fn steps(&self) -> &[ProofStep] {
+        &self.proof.steps
+    }
+}
+
 /// A Merkle tree built using SHA-256 with explicit domain separation.
 #[derive(Debug, Clone)]
 pub struct MerkleTree {
@@ -260,6 +284,12 @@ impl MerkleTree {
         let leaf_hash = self.layers[0][index];
         Some(InclusionProof { leaf_hash, steps })
     }
+
+    /// Generate an inclusion proof with the original leaf `index` as metadata.
+    pub fn prove_indexed(&self, index: usize) -> Option<IndexedInclusionProof> {
+        self.prove(index)
+            .map(|proof| IndexedInclusionProof { index, proof })
+    }
 }
 
 /// Verify an inclusion proof using the original leaf data and expected root.
@@ -355,5 +385,18 @@ mod tests {
             assert!(i < 4);
             assert_eq!(h.len(), 64);
         }
+    }
+
+    #[test]
+    fn indexed_proof_carries_index_and_verifies() {
+        let tree = MerkleTree::from_leaves(["a", "b", "c", "d"].map(|s| s.as_bytes()));
+        let root = tree.root().unwrap();
+        let idx = 2usize;
+        let ip = tree.prove_indexed(idx).expect("indexed proof");
+        assert_eq!(ip.index, idx);
+        assert!(ip.verify(root));
+        // convenience methods
+        assert_eq!(ip.leaf_hex().len(), 64);
+        assert_eq!(ip.steps().len(), ip.proof.steps.len());
     }
 }
