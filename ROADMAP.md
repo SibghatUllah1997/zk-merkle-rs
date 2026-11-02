@@ -32,3 +32,36 @@ This project will evolve from a simple educational Merkle tree to a more feature
 28. Add preimage resistance considerations and security notes
 29. Add advanced docs: tree variants, padding, and domains
 30. 1.0 polish pass: docs, examples, benches, feature flags, release
+
+## Milestone: Proof of Reserves
+
+Goal: allow an exchange to publish a commitment to all user balances and let each user verify inclusion and non-negativity of their balance, plus demonstrate aggregate solvency vs total liabilities.
+
+Order of work (small, incremental items):
+
+1. Define Merkle sum leaf format
+   - Leaf = `(account_id, amount)` with `amount: u128`
+   - Internal node carries `(hash, subtree_sum)` where `subtree_sum = left.sum + right.sum`
+   - Domain-separate sum-tree hashing from regular tree
+2. Implement Merkle sum tree
+   - New `merkle_sum` module feature-gated (default off)
+   - API: `from_leaves`, `root() -> (hash, sum)`, `prove(index) -> SumInclusionProof`
+   - serde support for proofs (optional)
+3. Inclusion proof for a user's balance
+   - Verify both path hashing and that sibling sums aggregate to root sum
+   - Provide example: verify `(account_id, amount)` appears with correct contribution
+4. ZK range proofs for non-negative balances
+   - Choose `halo2` (PSE) for a 64-bit range-check gadget (audited and widely used)
+   - Build a tiny circuit: witness `amount`, prove `0 <= amount < 2^64`
+   - Expose `generate_range_proof(amount)` and `verify_range_proof(proof)`
+   - Feature-gate as `zk-range` with optional `std` dependency for prover
+5. Solvency proof vs total liabilities
+   - Publish `(root_hash, total_sum)` from the Merkle sum tree
+   - Provide tooling to compare published `total_sum` vs independently computed liabilities snapshot
+   - Document assumptions (asset valuation, excluded accounts, timing)
+6. WASM verifier for users
+   - `wasm-bindgen` crate: verify inclusion proof and (optionally) range proof in browser
+   - Small demo page: input account id + amount + proof JSON → verify
+7. Operational docs and examples
+   - CLI flow: build tree from CSV → publish `(root_hash, total_sum)` → export proofs
+   - Threat model notes and limitations
