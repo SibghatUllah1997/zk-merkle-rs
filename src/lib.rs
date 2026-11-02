@@ -28,6 +28,14 @@
 //!   tree, whose root is exactly the leaf hash)
 //! - Hash function: sha2::Sha256 (audited crate; no hand-rolled crypto)
 
+#![cfg_attr(not(feature = "std"), no_std)]
+
+// When building without the `std` feature, pull Vec and String from `alloc`.
+#[cfg(not(feature = "std"))]
+extern crate alloc;
+#[cfg(not(feature = "std"))]
+use alloc::{string::String, vec::Vec};
+
 use sha2::{Digest, Sha256};
 
 /// Error returned when converting variable-length byte slices into fixed-size arrays.
