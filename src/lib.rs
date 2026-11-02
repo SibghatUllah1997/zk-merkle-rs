@@ -30,6 +30,38 @@
 
 use sha2::{Digest, Sha256};
 
+/// Error returned when converting variable-length byte slices into fixed-size arrays.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LengthError {
+    pub expected: usize,
+    pub found: usize,
+}
+
+impl core::fmt::Display for LengthError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "length {} does not match expected {}",
+            self.found, self.expected
+        )
+    }
+}
+
+/// Fallible conversion of a byte slice into a 32-byte array.
+#[inline]
+pub fn try_array32(bytes: &[u8]) -> Result<[u8; 32], LengthError> {
+    if bytes.len() != 32 {
+        return Err(LengthError {
+            expected: 32,
+            found: bytes.len(),
+        });
+    }
+    // SAFETY: We just checked length is exactly 32.
+    let mut out = [0u8; 32];
+    out.copy_from_slice(bytes);
+    Ok(out)
+}
+
 const LEAF_PREFIX: u8 = 0x00;
 const NODE_PREFIX: u8 = 0x01;
 
@@ -158,6 +190,19 @@ impl MerkleRoot {
     /// Hex-encode the root as a lowercase string.
     pub fn to_hex(&self) -> String {
         to_hex32(&self.0)
+    }
+}
+
+impl From<[u8; 32]> for MerkleRoot {
+    fn from(value: [u8; 32]) -> Self {
+        MerkleRoot(value)
+    }
+}
+
+impl<'a> core::convert::TryFrom<&'a [u8]> for MerkleRoot {
+    type Error = LengthError;
+    fn try_from(value: &'a [u8]) -> Result<Self, Self::Error> {
+        try_array32(value).map(MerkleRoot)
     }
 }
 
@@ -338,6 +383,41 @@ pub fn verify_inclusion(leaf_data: &[u8], steps: &[ProofStep], expected_root: [u
 mod tests {
     use super::*;
     use std::fmt::Write as _;
+
+    #[test]
+    fn try_array32_accepts_exact_len_and_rejects_others() {
+        let ok = [42u8; 32];
+        assert_eq!(try_array32(&ok).unwrap(), ok);
+        let short = [0u8; 31];
+        assert!(matches!(
+            try_array32(&short),
+            Err(LengthError {
+                expected: 32,
+                found: 31
+            })
+        ));
+        let mut long = [0u8; 33];
+        long[0] = 7;
+        assert!(matches!(
+            try_array32(&long),
+            Err(LengthError {
+                expected: 32,
+                found: 33
+            })
+        ));
+    }
+
+    #[test]
+    fn merkle_root_try_from_slice_and_from_array() {
+        let arr = [9u8; 32];
+        let mr_from = MerkleRoot::from(arr);
+        assert_eq!(*mr_from.as_bytes(), arr);
+        let mr_try = MerkleRoot::try_from(arr.as_slice()).expect("try_from ok");
+        assert_eq!(*mr_try.as_bytes(), arr);
+        // Wrong length should error
+        let bad = [0u8; 31];
+        assert!(MerkleRoot::try_from(&bad[..]).is_err());
+    }
 
     // Local helper retained for regression sanity.
     fn to_hex(bytes: &[u8]) -> String {
