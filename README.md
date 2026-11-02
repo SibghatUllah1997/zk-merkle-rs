@@ -1,57 +1,94 @@
-# merkle-tree (educational)
+<div align="center">
 
-Rust library implementing a SHA-256 Merkle tree with inclusion proofs, intended for learning and portfolio purposes. It starts with a simple, audited-hash (sha2) design and will grow toward zk-friendly hashes in future days.
+# merkle-tree
 
-Important: This crate is educational. Do not use it for production security-critical applications without a thorough review.
+Fast, tiny, no_std-friendly SHA-256 Merkle tree with inclusion proofs and a clean API.
 
-## What it does
+[![CI](https://github.com/SibghatUllah1997/zk-merkle-rs/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/SibghatUllah1997/zk-merkle-rs/actions/workflows/ci.yml)
+![MSRV](https://img.shields.io/badge/MSRV-1.64%2B-blue)
+![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)
 
-- Builds a Merkle tree from arbitrary leaf byte slices
-- Computes the Merkle root
-- Generates and verifies inclusion proofs
-- Uses `sha2::Sha256` (audited; no hand-rolled crypto)
+</div>
+
+### Why it matters
+- Merkle trees are a foundational building block for integrity, inclusion proofs, and commitments in distributed systems and blockchains.
+- This crate focuses on correctness and clarity with explicit domain separation and a small surface area suitable for audits and teaching.
+
+### Features
+- Proofs: generate and verify inclusion proofs
+- Indexed proofs: carry original leaf index alongside the proof
+- serde support: optional `serde` derive on proof/root types
+- no_std: works without `std` (uses `alloc`) via feature flags
 - Clear domain separation:
   - Leaf hash: H(0x00 || data)
   - Internal node hash: H(0x01 || left || right)
-  - Odd layers are padded by duplicating the last element
-  - Single-leaf trees use the leaf hash directly as the root (no extra padding)
+  - Odd layers are padded by duplicating the last element (single-leaf root = leaf hash)
 
-## Quickstart
+### Install
+Add to your `Cargo.toml` (git until published):
 
-```rust
-use merkle_tree::{MerkleTree, verify_inclusion};
-
-let leaves = [b\"a\".as_ref(), b\"b\", b\"c\", b\"d\"];
-let tree = MerkleTree::from_leaves(leaves);
-let root = tree.root().expect(\"root\");
-
-// Create and verify a proof for leaf at index 2 (\"c\")
-let proof = tree.prove(2).expect(\"proof\");
-assert!(proof.verify(root));
-
-// Or verify with the helper using raw leaf data:
-assert!(verify_inclusion(b\"c\", &proof.steps, root));
+```toml
+[dependencies]
+merkle-tree = { git = "https://github.com/SibghatUllah1997/zk-merkle-rs", features = ["serde"] }
 ```
 
-## Odd-leaf padding
+no_std users can disable `std`:
+```toml
+merkle-tree = { git = "https://github.com/SibghatUllah1997/zk-merkle-rs", default-features = false, features = ["serde"] }
+```
 
-This library pads odd layers by duplicating the last element. For example, with three leaves
-`[a, b, c]`, the bottom layer pairs as `(a, b)` and `(c, c)`. For a single-leaf tree, the
-root is exactly the leaf hash (we do not introduce a synthetic parent).
+### Usage
+This example compiles and is also covered by doctests in the crate:
 
-Alternative padding choices (not implemented here) include:
-- Using a domain-separated zero-hash sentinel for missing siblings
-- Padding the bottom layer up to the next power of two
-- Omitting incomplete pairs (not recommended; ambiguous)
+```rust
+use merkle_tree::{verify_inclusion, MerkleTree};
 
-Duplicating the last element keeps proofs simple and interoperable with common Merkle designs,
-while our explicit domain separation prevents cross-level collisions.
+let leaves = [b"a".as_ref(), b"b", b"c", b"d"];
+let tree = MerkleTree::from_leaves(leaves);
+let root = tree.root().expect("root");
 
-## Roadmap
+// Create and verify a proof for the leaf at index 2 ("c")
+let proof = tree.prove(2).expect("proof");
+assert!(proof.verify(root));
 
-See `ROADMAP.md` for the 30-day plan as this grows toward zk-friendly hashes and richer features.
+// Or verify using the free function with raw leaf data:
+assert!(verify_inclusion(b"c", &proof.steps, root));
+```
 
-## License
+### Benchmarks (micro, one-shot)
+Numbers from `cargo bench` on this repo (wall-clock, single run per size):
 
-MIT. See `LICENSE` for details.
-# zk-merkle-rs
+| n    | build (one-shot) | prove(3 positions) |
+|------|-------------------|--------------------|
+| 8    | 5.814µs           | 1.61µs             |
+| 64   | 12.596µs          | 1.664µs            |
+| 512  | 106.09µs          | 2.211µs            |
+| 4096 | 716.38µs          | 536ns              |
+
+Your results will vary with hardware and toolchain.
+
+### Diagram (mermaid)
+```mermaid
+graph TD
+    A["leaf a (H(0x00||a))"] --> N1["H(0x01||A||B)"]
+    B["leaf b (H(0x00||b))"] --> N1
+    C["leaf c (H(0x00||c))"] --> N2["H(0x01||C||D)"]
+    D["leaf d (H(0x00||d))"] --> N2
+    N1 --> R["root = H(0x01||N1||N2)"]
+    N2 --> R
+```
+
+### Testing
+- Run unit tests and doctests: `cargo test`
+- Format and lints: `cargo fmt --all --check` and `cargo clippy --all-targets --all-features -D warnings`
+- Docs: `cargo doc --no-deps`
+
+### Roadmap
+See `ROADMAP.md` for milestones and upcoming work.
+
+### License
+Licensed under either of
+- Apache License, Version 2.0, (`LICENSE-APACHE` or <http://www.apache.org/licenses/LICENSE-2.0>)
+- MIT license (`LICENSE-MIT` or <http://opensource.org/licenses/MIT>)
+
+at your option.
