@@ -207,6 +207,18 @@ impl From<[u8; 32]> for MerkleRoot {
     }
 }
 
+impl AsRef<[u8; 32]> for MerkleRoot {
+    fn as_ref(&self) -> &[u8; 32] {
+        &self.0
+    }
+}
+
+impl From<MerkleRoot> for [u8; 32] {
+    fn from(value: MerkleRoot) -> [u8; 32] {
+        value.0
+    }
+}
+
 impl<'a> core::convert::TryFrom<&'a [u8]> for MerkleRoot {
     type Error = LengthError;
     fn try_from(value: &'a [u8]) -> Result<Self, Self::Error> {
@@ -422,6 +434,11 @@ mod tests {
         assert_eq!(*mr_from.as_bytes(), arr);
         let mr_try = MerkleRoot::try_from(arr.as_slice()).expect("try_from ok");
         assert_eq!(*mr_try.as_bytes(), arr);
+        // trait conversions
+        let arr_back: [u8; 32] = mr_try.into();
+        assert_eq!(arr_back, arr);
+        let mr_ref_slice: &[u8; 32] = mr_from.as_ref();
+        assert_eq!(mr_ref_slice, &arr);
         // Wrong length should error
         let bad = [0u8; 31];
         assert!(MerkleRoot::try_from(&bad[..]).is_err());
