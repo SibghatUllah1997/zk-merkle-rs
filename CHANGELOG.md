@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-11-02
+
+- Add no_std (alloc) support behind a crate feature; default remains std
+- Introduce length-safe [u8; 32] conversions and TryFrom for MerkleRoot
+
 ## 2026-11-01
 
 - Add leaf metadata helpers (LeafInfo) and indexed inclusion proofs

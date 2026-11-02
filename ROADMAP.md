@@ -9,8 +9,8 @@ This project will evolve from a simple educational Merkle tree to a more feature
 5. Validate odd-leaf padding choices and document alternatives [x]
 6. Add optional leaf indexing and metadata helpers [x]
 7. Add serde (optional) for proofs and roots [x]
-8. Add no_std (alloc) support feature-flag
-9. Add `TryFrom` and safe conversions for byte arrays
+8. Add no_std (alloc) support feature-flag [x]
+9. Add `TryFrom` and safe conversions for byte arrays [x]
 10. Add a simple CLI demo (build tree, print root, verify proof)
 11. Add cargo `--features` matrix to CI (std/no_std)
 12. Split modules: hashing, tree, proof, errors
