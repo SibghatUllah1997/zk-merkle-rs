@@ -208,6 +208,96 @@ pub struct ProofStep {
     pub side: SiblingSide,
 }
 
+/// Error returned when parsing a proof-step token list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ParseStepsError {
+    /// A comma-separated token was empty (for example a trailing comma).
+    EmptyToken,
+    /// Token did not contain a `:` separator.
+    MissingColon { token: String },
+    /// Side marker was not `L`/`l` or `R`/`r`.
+    BadSide { found: String },
+    /// Hex payload of a token could not be decoded as 32 bytes.
+    Hex(HexError),
+}
+
+impl core::fmt::Display for ParseStepsError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            ParseStepsError::EmptyToken => write!(f, "empty proof step token"),
+            ParseStepsError::MissingColon { token } => {
+                write!(f, "proof step {token:?} is missing a ':' separator")
+            }
+            ParseStepsError::BadSide { found } => {
+                write!(f, "proof step side {found:?} is not L or R")
+            }
+            ParseStepsError::Hex(err) => write!(f, "proof step hex: {err}"),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for ParseStepsError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            ParseStepsError::Hex(err) => Some(err),
+            _ => None,
+        }
+    }
+}
+
+impl ProofStep {
+    /// Parse a single `L:<32-byte hex>` or `R:<32-byte hex>` token.
+    pub fn parse(token: &str) -> Result<Self, ParseStepsError> {
+        let token = token.trim();
+        if token.is_empty() {
+            return Err(ParseStepsError::EmptyToken);
+        }
+        let (side_str, hex_str) =
+            token
+                .split_once(':')
+                .ok_or_else(|| ParseStepsError::MissingColon {
+                    token: String::from(token),
+                })?;
+        let side = match side_str {
+            "L" | "l" => SiblingSide::Left,
+            "R" | "r" => SiblingSide::Right,
+            other => {
+                return Err(ParseStepsError::BadSide {
+                    found: String::from(other),
+                });
+            }
+        };
+        let sibling = try_from_hex32(hex_str).map_err(ParseStepsError::Hex)?;
+        Ok(ProofStep { sibling, side })
+    }
+}
+
+impl core::fmt::Display for ProofStep {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let side = match self.side {
+            SiblingSide::Left => 'L',
+            SiblingSide::Right => 'R',
+        };
+        write!(f, "{}:{}", side, to_hex32(&self.sibling))
+    }
+}
+
+/// Parse a comma-separated proof path such as `R:ab..cd,L:ef..`.
+///
+/// Empty input (after trim) is a valid empty path, matching a single-leaf tree.
+pub fn parse_proof_steps(spec: &str) -> Result<Vec<ProofStep>, ParseStepsError> {
+    let spec = spec.trim();
+    if spec.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut steps = Vec::new();
+    for token in spec.split(',') {
+        steps.push(ProofStep::parse(token)?);
+    }
+    Ok(steps)
+}
+
 /// Inclusion proof for a specific leaf.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -249,17 +339,33 @@ impl InclusionProof {
             })
             .collect()
     }
+
+    /// Compact comma-separated step list, e.g. `R:ab..,L:cd..`.
+    ///
+    /// This is the inverse of [`parse_proof_steps`].
+    pub fn steps_spec(&self) -> String {
+        let mut out = String::new();
+        for (i, step) in self.steps.iter().enumerate() {
+            if i > 0 {
+                out.push(',');
+            }
+            let side = match step.side {
+                SiblingSide::Left => 'L',
+                SiblingSide::Right => 'R',
+            };
+            out.push(side);
+            out.push(':');
+            out.push_str(&to_hex32(&step.sibling));
+        }
+        out
+    }
 }
 
 impl core::fmt::Display for InclusionProof {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "leaf={}, steps=[", to_hex32(&self.leaf_hash))?;
         for (i, step) in self.steps.iter().enumerate() {
-            let side = match step.side {
-                SiblingSide::Left => 'L',
-                SiblingSide::Right => 'R',
-            };
-            write!(f, "{}:{}", side, to_hex32(&step.sibling))?;
+            write!(f, "{step}")?;
             if i + 1 != self.steps.len() {
                 write!(f, ", ")?;
             }
@@ -705,5 +811,57 @@ mod tests {
             })
         ));
         assert!(MerkleRoot::from_hex("not-hex").is_err());
+    }
+
+    #[test]
+    fn proof_steps_spec_roundtrips_and_verifies() {
+        let tree = MerkleTree::from_leaves(["a", "b", "c", "d"].map(|s| s.as_bytes()));
+        let proof = tree.prove(2).expect("proof");
+        let spec = proof.steps_spec();
+        let parsed = parse_proof_steps(&spec).expect("parse steps");
+        assert_eq!(parsed, proof.steps);
+        assert_eq!(proof.steps[0].to_string(), spec.split(',').next().unwrap());
+
+        let rebuilt = InclusionProof {
+            leaf_hash: proof.leaf_hash,
+            steps: parsed,
+        };
+        assert!(rebuilt.verify(tree.root().unwrap()));
+
+        // whitespace, lowercase side, empty path
+        let with_space = parse_proof_steps(&format!(" {} ", spec.replace(',', ", "))).unwrap();
+        assert_eq!(with_space, proof.steps);
+        let lower = spec.replace('R', "r").replace('L', "l");
+        assert_eq!(parse_proof_steps(&lower).unwrap(), proof.steps);
+        assert!(parse_proof_steps("").unwrap().is_empty());
+        assert!(parse_proof_steps("   ").unwrap().is_empty());
+
+        let single = MerkleTree::from_leaves(["only"].map(|s| s.as_bytes()));
+        assert!(single.prove(0).unwrap().steps_spec().is_empty());
+    }
+
+    #[test]
+    fn parse_proof_steps_rejects_malformed_tokens() {
+        assert!(matches!(
+            parse_proof_steps(","),
+            Err(ParseStepsError::EmptyToken)
+        ));
+        assert!(matches!(
+            ProofStep::parse("no-colon"),
+            Err(ParseStepsError::MissingColon { .. })
+        ));
+        assert!(matches!(
+            ProofStep::parse("X:00"),
+            Err(ParseStepsError::BadSide { .. })
+        ));
+        assert!(matches!(
+            ProofStep::parse("L:abcd"),
+            Err(ParseStepsError::Hex(HexError::UnexpectedLen { .. }))
+        ));
+        let msg = ParseStepsError::BadSide {
+            found: String::from("X"),
+        }
+        .to_string();
+        assert!(msg.contains('X'));
     }
 }
