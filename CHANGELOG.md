@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-03
+
+- Add a `merkle` demo CLI to build a tree, print the root, and prove/verify inclusion
+- Decode hex roots and compact L/R proof-step lists for copy-paste verification
+- Run CI across std and no_std feature combinations (with and without serde)
+
 ## 2026-11-02
 
 - Add no_std (alloc) support behind a crate feature; default remains std

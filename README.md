@@ -91,6 +91,7 @@ graph TD
 
 ### Testing
 - Run unit tests and doctests: `cargo test`
+- no_std surface: `cargo test --no-default-features` and `cargo test --no-default-features --features serde`
 - Format and lints: `cargo fmt --all --check` and `cargo clippy --all-targets --all-features -D warnings`
 - Docs: `cargo doc --no-deps`
 
