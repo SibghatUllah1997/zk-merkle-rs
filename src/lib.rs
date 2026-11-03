@@ -73,6 +73,98 @@ pub fn try_array32(bytes: &[u8]) -> Result<[u8; 32], LengthError> {
 const LEAF_PREFIX: u8 = 0x00;
 const NODE_PREFIX: u8 = 0x01;
 
+/// Error returned when decoding a hex string.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HexError {
+    /// Input had an odd number of hex characters.
+    OddLength { chars: usize },
+    /// Character at `index` is not a hex digit.
+    InvalidDigit { index: usize, digit: char },
+    /// Decoded byte length did not match the expected size.
+    UnexpectedLen { expected: usize, found: usize },
+}
+
+impl core::fmt::Display for HexError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            HexError::OddLength { chars } => {
+                write!(f, "odd-length hex string ({chars} chars)")
+            }
+            HexError::InvalidDigit { index, digit } => {
+                write!(f, "invalid hex digit {digit:?} at index {index}")
+            }
+            HexError::UnexpectedLen { expected, found } => {
+                write!(
+                    f,
+                    "decoded length {found} does not match expected {expected}"
+                )
+            }
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for HexError {}
+
+#[cfg(feature = "std")]
+impl std::error::Error for LengthError {}
+
+fn hex_nibble(byte: u8, index: usize) -> Result<u8, HexError> {
+    let value = match byte {
+        b'0'..=b'9' => byte - b'0',
+        b'a'..=b'f' => byte - b'a' + 10,
+        b'A'..=b'F' => byte - b'A' + 10,
+        _ => {
+            return Err(HexError::InvalidDigit {
+                index,
+                digit: char::from(byte),
+            });
+        }
+    };
+    Ok(value)
+}
+
+/// Decode a hex string into bytes.
+///
+/// Accepts optional `0x`/`0X` prefixes and both lower- and upper-case digits.
+/// Surrounding whitespace is ignored; interior whitespace is not.
+pub fn from_hex(input: &str) -> Result<Vec<u8>, HexError> {
+    let trimmed = input.trim();
+    let hex_body = trimmed
+        .strip_prefix("0x")
+        .or_else(|| trimmed.strip_prefix("0X"))
+        .unwrap_or(trimmed);
+    if hex_body.len() % 2 != 0 {
+        return Err(HexError::OddLength {
+            chars: hex_body.len(),
+        });
+    }
+    let bytes = hex_body.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len() / 2);
+    let mut index = 0;
+    while index < bytes.len() {
+        let hi = hex_nibble(bytes[index], index)?;
+        let lo = hex_nibble(bytes[index + 1], index + 1)?;
+        out.push((hi << 4) | lo);
+        index += 2;
+    }
+    Ok(out)
+}
+
+/// Decode a hex string into a 32-byte array.
+pub fn try_from_hex32(input: &str) -> Result<[u8; 32], HexError> {
+    let bytes = from_hex(input)?;
+    if bytes.len() != 32 {
+        return Err(HexError::UnexpectedLen {
+            expected: 32,
+            found: bytes.len(),
+        });
+    }
+    let mut out = [0u8; 32];
+    out.copy_from_slice(&bytes);
+    Ok(out)
+}
+
 /// Encode bytes as lowercase hex string.
 pub fn to_hex(bytes: &[u8]) -> String {
     hex::encode(bytes)
@@ -199,6 +291,11 @@ impl MerkleRoot {
     pub fn to_hex(&self) -> String {
         to_hex32(&self.0)
     }
+
+    /// Decode a 32-byte root from a hex string (optional `0x` prefix).
+    pub fn from_hex(input: &str) -> Result<Self, HexError> {
+        try_from_hex32(input).map(MerkleRoot)
+    }
 }
 
 impl From<[u8; 32]> for MerkleRoot {
@@ -223,6 +320,13 @@ impl<'a> core::convert::TryFrom<&'a [u8]> for MerkleRoot {
     type Error = LengthError;
     fn try_from(value: &'a [u8]) -> Result<Self, Self::Error> {
         try_array32(value).map(MerkleRoot)
+    }
+}
+
+impl<'a> core::convert::TryFrom<&'a str> for MerkleRoot {
+    type Error = HexError;
+    fn try_from(value: &'a str) -> Result<Self, Self::Error> {
+        MerkleRoot::from_hex(value)
     }
 }
 
@@ -402,7 +506,9 @@ pub fn verify_inclusion(leaf_data: &[u8], steps: &[ProofStep], expected_root: [u
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fmt::Write as _;
+    #[cfg(not(feature = "std"))]
+    use alloc::{format, string::String, string::ToString, vec::Vec};
+    use core::fmt::Write as _;
 
     #[test]
     fn try_array32_accepts_exact_len_and_rejects_others() {
@@ -546,5 +652,58 @@ mod tests {
         assert_eq!(raw, *typed.as_bytes());
         assert_eq!(typed.to_hex(), to_hex32(&raw));
         assert_eq!(typed.to_string(), to_hex32(&raw));
+    }
+
+    #[test]
+    fn from_hex_roundtrips_and_rejects_bad_input() {
+        let original = [0x00, 0xab, 0xcd, 0xef, 0x12, 0x34];
+        let encoded = to_hex(&original);
+        assert_eq!(from_hex(&encoded).expect("decode"), original);
+        assert_eq!(from_hex("00ABCDEF1234").expect("upper"), original);
+        assert_eq!(from_hex("  0x00abcdef1234  ").expect("prefix"), original);
+        assert_eq!(from_hex("0X00abcdef1234").expect("0X"), original);
+        assert_eq!(from_hex("").expect("empty"), Vec::<u8>::new());
+
+        assert!(matches!(
+            from_hex("abc"),
+            Err(HexError::OddLength { chars: 3 })
+        ));
+        assert!(matches!(
+            from_hex("zz"),
+            Err(HexError::InvalidDigit {
+                index: 0,
+                digit: 'z'
+            })
+        ));
+        assert!(matches!(
+            from_hex("0x0g"),
+            Err(HexError::InvalidDigit {
+                index: 1,
+                digit: 'g'
+            })
+        ));
+    }
+
+    #[test]
+    fn try_from_hex32_and_merkle_root_from_hex() {
+        let tree = MerkleTree::from_leaves(["a", "b", "c", "d"].map(|s| s.as_bytes()));
+        let raw = tree.root().expect("root");
+        let hex = to_hex32(&raw);
+        assert_eq!(try_from_hex32(&hex).expect("32"), raw);
+        assert_eq!(MerkleRoot::from_hex(&hex).expect("root").0, raw);
+        assert_eq!(MerkleRoot::try_from(hex.as_str()).expect("try_from").0, raw);
+        assert_eq!(
+            MerkleRoot::from_hex(&format!("0x{hex}")).expect("0x").0,
+            raw
+        );
+
+        assert!(matches!(
+            try_from_hex32("abcd"),
+            Err(HexError::UnexpectedLen {
+                expected: 32,
+                found: 2
+            })
+        ));
+        assert!(MerkleRoot::from_hex("not-hex").is_err());
     }
 }
