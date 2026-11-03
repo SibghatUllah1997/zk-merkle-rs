@@ -18,6 +18,17 @@ serde = { version = "1.0", default-features = false, features = ["derive", "allo
 
 [dev-dependencies]
 
+[[bin]]
+name = "merkle"
+path = "src/bin/merkle.rs"
+required-features = ["std"]
+doc = false
+
+[[test]]
+name = "cli_bin"
+path = "tests/cli_bin.rs"
+required-features = ["std"]
+
 [[bench]]
 name = "merkle_build"
 harness = false

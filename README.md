@@ -37,6 +37,17 @@ no_std users can disable `std`:
 merkle-tree = { git = "https://github.com/SibghatUllah1997/zk-merkle-rs", default-features = false, features = ["serde"] }
 ```
 
+### CLI demo
+Build the `merkle` binary (needs the default `std` feature) to print roots and check proofs:
+
+```bash
+cargo run --bin merkle -- build a b c d
+cargo run --bin merkle -- prove --index 2 a b c d
+cargo run --bin merkle -- verify --leaf c --root <root-hex> --steps <L|R:hex,...>
+```
+
+`build` prints a 64-character lowercase hex root. `prove` prints `root`, `index`, `leaf_hash`, and compact `steps` that `verify` consumes.
+
 ### Usage
 This example compiles and is also covered by doctests in the crate:
 
