@@ -38,6 +38,12 @@ use alloc::{string::String, vec::Vec};
 
 use sha2::{Digest, Sha256};
 
+/// Command-line demo: build a tree, print the root, prove and verify inclusion.
+///
+/// Available when the `std` feature is enabled (the crate default).
+#[cfg(feature = "std")]
+pub mod cli;
+
 /// Error returned when converting variable-length byte slices into fixed-size arrays.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LengthError {
