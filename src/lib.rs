@@ -46,155 +46,17 @@ pub mod cli;
 pub mod error;
 /// Domain-separated SHA-256 hashing and hex helpers for 32-byte digests.
 pub mod hashing;
+/// Inclusion proofs and compact L/R step encoding.
+pub mod proof;
 
 pub use error::{try_array32, HexError, LengthError, ParseStepsError};
 pub use hashing::{
     from_hex, hash_leaf, hash_nodes, to_hex, to_hex32, try_from_hex32, LEAF_PREFIX, NODE_PREFIX,
 };
-
-/// Direction of a sibling node in a proof step.
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SiblingSide {
-    Left,
-    Right,
-}
-
-/// One step of an inclusion proof path: the sibling hash and its side.
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProofStep {
-    pub sibling: [u8; 32],
-    pub side: SiblingSide,
-}
-
-impl ProofStep {
-    /// Parse a single `L:<32-byte hex>` or `R:<32-byte hex>` token.
-    pub fn parse(token: &str) -> Result<Self, ParseStepsError> {
-        let token = token.trim();
-        if token.is_empty() {
-            return Err(ParseStepsError::EmptyToken);
-        }
-        let (side_str, hex_str) =
-            token
-                .split_once(':')
-                .ok_or_else(|| ParseStepsError::MissingColon {
-                    token: String::from(token),
-                })?;
-        let side = match side_str {
-            "L" | "l" => SiblingSide::Left,
-            "R" | "r" => SiblingSide::Right,
-            other => {
-                return Err(ParseStepsError::BadSide {
-                    found: String::from(other),
-                });
-            }
-        };
-        let sibling = try_from_hex32(hex_str).map_err(ParseStepsError::Hex)?;
-        Ok(ProofStep { sibling, side })
-    }
-}
-
-impl core::fmt::Display for ProofStep {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let side = match self.side {
-            SiblingSide::Left => 'L',
-            SiblingSide::Right => 'R',
-        };
-        write!(f, "{}:{}", side, to_hex32(&self.sibling))
-    }
-}
-
-/// Parse a comma-separated proof path such as `R:ab..cd,L:ef..`.
-///
-/// Empty input (after trim) is a valid empty path, matching a single-leaf tree.
-pub fn parse_proof_steps(spec: &str) -> Result<Vec<ProofStep>, ParseStepsError> {
-    let spec = spec.trim();
-    if spec.is_empty() {
-        return Ok(Vec::new());
-    }
-    let mut steps = Vec::new();
-    for token in spec.split(',') {
-        steps.push(ProofStep::parse(token)?);
-    }
-    Ok(steps)
-}
-
-/// Inclusion proof for a specific leaf.
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct InclusionProof {
-    /// Hash of the original leaf data: H(0x00 || data)
-    pub leaf_hash: [u8; 32],
-    /// Ordered siblings from the leaf layer up to (but not including) the root.
-    pub steps: Vec<ProofStep>,
-}
-
-impl InclusionProof {
-    /// Verify this proof against an expected root.
-    pub fn verify(&self, expected_root: [u8; 32]) -> bool {
-        let mut acc = self.leaf_hash;
-        for step in &self.steps {
-            acc = match step.side {
-                SiblingSide::Left => hash_nodes(&step.sibling, &acc),
-                SiblingSide::Right => hash_nodes(&acc, &step.sibling),
-            };
-        }
-        acc == expected_root
-    }
-
-    /// Leaf hash as lowercase hex.
-    pub fn leaf_hex(&self) -> String {
-        to_hex32(&self.leaf_hash)
-    }
-
-    /// Steps rendered as `Vec<(side, hex)>`, where side is `"L"` or `"R"`.
-    pub fn steps_hex(&self) -> Vec<(char, String)> {
-        self.steps
-            .iter()
-            .map(|s| {
-                let side = match s.side {
-                    SiblingSide::Left => 'L',
-                    SiblingSide::Right => 'R',
-                };
-                (side, to_hex32(&s.sibling))
-            })
-            .collect()
-    }
-
-    /// Compact comma-separated step list, e.g. `R:ab..,L:cd..`.
-    ///
-    /// This is the inverse of [`parse_proof_steps`].
-    pub fn steps_spec(&self) -> String {
-        let mut out = String::new();
-        for (i, step) in self.steps.iter().enumerate() {
-            if i > 0 {
-                out.push(',');
-            }
-            let side = match step.side {
-                SiblingSide::Left => 'L',
-                SiblingSide::Right => 'R',
-            };
-            out.push(side);
-            out.push(':');
-            out.push_str(&to_hex32(&step.sibling));
-        }
-        out
-    }
-}
-
-impl core::fmt::Display for InclusionProof {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "leaf={}, steps=[", to_hex32(&self.leaf_hash))?;
-        for (i, step) in self.steps.iter().enumerate() {
-            write!(f, "{step}")?;
-            if i + 1 != self.steps.len() {
-                write!(f, ", ")?;
-            }
-        }
-        write!(f, "]")
-    }
-}
+pub use proof::{
+    parse_proof_steps, verify_inclusion, InclusionProof, IndexedInclusionProof, ProofStep,
+    SiblingSide,
+};
 
 /// Minimal per-leaf metadata: the leaf's index and its hashed value.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -261,31 +123,6 @@ impl<'a> core::convert::TryFrom<&'a str> for MerkleRoot {
 impl core::fmt::Display for MerkleRoot {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{}", self.to_hex())
-    }
-}
-
-/// Inclusion proof carrying the original leaf index as metadata.
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct IndexedInclusionProof {
-    pub index: usize,
-    pub proof: InclusionProof,
-}
-
-impl IndexedInclusionProof {
-    /// Verify this proof against an expected root.
-    pub fn verify(&self, expected_root: [u8; 32]) -> bool {
-        self.proof.verify(expected_root)
-    }
-
-    /// Leaf hash as lowercase hex.
-    pub fn leaf_hex(&self) -> String {
-        self.proof.leaf_hex()
-    }
-
-    /// Borrow the ordered proof steps.
-    pub fn steps(&self) -> &[ProofStep] {
-        &self.proof.steps
     }
 }
 
@@ -422,20 +259,11 @@ impl MerkleTree {
     }
 }
 
-/// Verify an inclusion proof using the original leaf data and expected root.
-pub fn verify_inclusion(leaf_data: &[u8], steps: &[ProofStep], expected_root: [u8; 32]) -> bool {
-    let proof = InclusionProof {
-        leaf_hash: hash_leaf(leaf_data),
-        steps: steps.to_vec(),
-    };
-    proof.verify(expected_root)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     #[cfg(not(feature = "std"))]
-    use alloc::{format, string::String, string::ToString};
+    use alloc::{format, string::ToString};
 
     #[test]
     fn merkle_root_try_from_slice_and_from_array() {
@@ -597,30 +425,5 @@ mod tests {
 
         let single = MerkleTree::from_leaves(["only"].map(|s| s.as_bytes()));
         assert!(single.prove(0).unwrap().steps_spec().is_empty());
-    }
-
-    #[test]
-    fn parse_proof_steps_rejects_malformed_tokens() {
-        assert!(matches!(
-            parse_proof_steps(","),
-            Err(ParseStepsError::EmptyToken)
-        ));
-        assert!(matches!(
-            ProofStep::parse("no-colon"),
-            Err(ParseStepsError::MissingColon { .. })
-        ));
-        assert!(matches!(
-            ProofStep::parse("X:00"),
-            Err(ParseStepsError::BadSide { .. })
-        ));
-        assert!(matches!(
-            ProofStep::parse("L:abcd"),
-            Err(ParseStepsError::Hex(HexError::UnexpectedLen { .. }))
-        ));
-        let msg = ParseStepsError::BadSide {
-            found: String::from("X"),
-        }
-        .to_string();
-        assert!(msg.contains('X'));
     }
 }
