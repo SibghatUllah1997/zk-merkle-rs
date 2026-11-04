@@ -42,80 +42,15 @@ use alloc::{string::String, vec::Vec};
 #[cfg(feature = "std")]
 pub mod cli;
 
+/// Recoverable conversion and parse errors.
+pub mod error;
 /// Domain-separated SHA-256 hashing and hex helpers for 32-byte digests.
 pub mod hashing;
 
+pub use error::{try_array32, HexError, LengthError, ParseStepsError};
 pub use hashing::{
     from_hex, hash_leaf, hash_nodes, to_hex, to_hex32, try_from_hex32, LEAF_PREFIX, NODE_PREFIX,
 };
-
-/// Error returned when converting variable-length byte slices into fixed-size arrays.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct LengthError {
-    pub expected: usize,
-    pub found: usize,
-}
-
-impl core::fmt::Display for LengthError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(
-            f,
-            "length {} does not match expected {}",
-            self.found, self.expected
-        )
-    }
-}
-
-/// Fallible conversion of a byte slice into a 32-byte array.
-#[inline]
-pub fn try_array32(bytes: &[u8]) -> Result<[u8; 32], LengthError> {
-    if bytes.len() != 32 {
-        return Err(LengthError {
-            expected: 32,
-            found: bytes.len(),
-        });
-    }
-    // SAFETY: We just checked length is exactly 32.
-    let mut out = [0u8; 32];
-    out.copy_from_slice(bytes);
-    Ok(out)
-}
-
-/// Error returned when decoding a hex string.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HexError {
-    /// Input had an odd number of hex characters.
-    OddLength { chars: usize },
-    /// Character at `index` is not a hex digit.
-    InvalidDigit { index: usize, digit: char },
-    /// Decoded byte length did not match the expected size.
-    UnexpectedLen { expected: usize, found: usize },
-}
-
-impl core::fmt::Display for HexError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            HexError::OddLength { chars } => {
-                write!(f, "odd-length hex string ({chars} chars)")
-            }
-            HexError::InvalidDigit { index, digit } => {
-                write!(f, "invalid hex digit {digit:?} at index {index}")
-            }
-            HexError::UnexpectedLen { expected, found } => {
-                write!(
-                    f,
-                    "decoded length {found} does not match expected {expected}"
-                )
-            }
-        }
-    }
-}
-
-#[cfg(feature = "std")]
-impl std::error::Error for HexError {}
-
-#[cfg(feature = "std")]
-impl std::error::Error for LengthError {}
 
 /// Direction of a sibling node in a proof step.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -131,44 +66,6 @@ pub enum SiblingSide {
 pub struct ProofStep {
     pub sibling: [u8; 32],
     pub side: SiblingSide,
-}
-
-/// Error returned when parsing a proof-step token list.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ParseStepsError {
-    /// A comma-separated token was empty (for example a trailing comma).
-    EmptyToken,
-    /// Token did not contain a `:` separator.
-    MissingColon { token: String },
-    /// Side marker was not `L`/`l` or `R`/`r`.
-    BadSide { found: String },
-    /// Hex payload of a token could not be decoded as 32 bytes.
-    Hex(HexError),
-}
-
-impl core::fmt::Display for ParseStepsError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            ParseStepsError::EmptyToken => write!(f, "empty proof step token"),
-            ParseStepsError::MissingColon { token } => {
-                write!(f, "proof step {token:?} is missing a ':' separator")
-            }
-            ParseStepsError::BadSide { found } => {
-                write!(f, "proof step side {found:?} is not L or R")
-            }
-            ParseStepsError::Hex(err) => write!(f, "proof step hex: {err}"),
-        }
-    }
-}
-
-#[cfg(feature = "std")]
-impl std::error::Error for ParseStepsError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            ParseStepsError::Hex(err) => Some(err),
-            _ => None,
-        }
-    }
 }
 
 impl ProofStep {
@@ -539,29 +436,6 @@ mod tests {
     use super::*;
     #[cfg(not(feature = "std"))]
     use alloc::{format, string::String, string::ToString};
-
-    #[test]
-    fn try_array32_accepts_exact_len_and_rejects_others() {
-        let ok = [42u8; 32];
-        assert_eq!(try_array32(&ok).unwrap(), ok);
-        let short = [0u8; 31];
-        assert!(matches!(
-            try_array32(&short),
-            Err(LengthError {
-                expected: 32,
-                found: 31
-            })
-        ));
-        let mut long = [0u8; 33];
-        long[0] = 7;
-        assert!(matches!(
-            try_array32(&long),
-            Err(LengthError {
-                expected: 32,
-                found: 33
-            })
-        ));
-    }
 
     #[test]
     fn merkle_root_try_from_slice_and_from_array() {

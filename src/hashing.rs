@@ -14,7 +14,7 @@ use alloc::{string::String, vec::Vec};
 
 use sha2::{Digest, Sha256};
 
-use crate::HexError;
+use crate::error::HexError;
 
 /// Domain-separation prefix prepended to raw leaf data before hashing.
 pub const LEAF_PREFIX: u8 = 0x00;
