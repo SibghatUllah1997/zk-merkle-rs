@@ -11,6 +11,8 @@
 //!
 //! let leaves = [b"a".as_ref(), b"b", b"c", b"d"];
 //! let tree = MerkleTree::from_leaves(leaves);
+//! let collected: MerkleTree = ["a", "b", "c", "d"].into_iter().collect();
+//! assert_eq!(tree.root(), collected.root());
 //! let root = tree.root().expect("root");
 //!
 //! // Create and verify a proof for the leaf at index 2 ("c")

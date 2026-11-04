@@ -233,12 +233,19 @@ impl MerkleTree {
     }
 }
 
+impl<T: AsRef<[u8]>> core::iter::FromIterator<T> for MerkleTree {
+    /// Hash each item as a leaf and build the tree, matching [`Self::from_leaves`].
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        Self::from_leaves(iter)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::proof::{parse_proof_steps, verify_inclusion};
     #[cfg(not(feature = "std"))]
-    use alloc::{format, string::ToString};
+    use alloc::{format, string::String, string::ToString};
 
     #[test]
     fn merkle_root_try_from_slice_and_from_array() {
@@ -415,5 +422,38 @@ mod tests {
 
         let single = MerkleTree::from_leaves(["only"].map(|s| s.as_bytes()));
         assert!(single.prove(0).unwrap().steps_spec().is_empty());
+    }
+
+    #[test]
+    fn collect_from_strs_matches_from_leaves() {
+        let expected = MerkleTree::from_leaves(["a", "b", "c", "d"]);
+        let collected: MerkleTree = ["a", "b", "c", "d"].into_iter().collect();
+        assert_eq!(collected.root(), expected.root());
+        assert_eq!(collected.leaf_count(), expected.leaf_count());
+        assert_eq!(collected.leaf_infos(), expected.leaf_infos());
+    }
+
+    #[test]
+    fn collect_from_byte_slices_vecs_and_strings() {
+        let from_slices: MerkleTree = [b"a".as_ref(), b"b".as_ref(), b"c".as_ref()]
+            .into_iter()
+            .collect();
+        let from_vecs: MerkleTree = [b"a".to_vec(), b"b".to_vec(), b"c".to_vec()]
+            .into_iter()
+            .collect();
+        let from_owned: MerkleTree = [String::from("a"), String::from("b"), String::from("c")]
+            .into_iter()
+            .collect();
+        let expected = MerkleTree::from_leaves(["a", "b", "c"]);
+        assert_eq!(from_slices.root(), expected.root());
+        assert_eq!(from_vecs.root(), expected.root());
+        assert_eq!(from_owned.root(), expected.root());
+    }
+
+    #[test]
+    fn collect_empty_iterator_is_empty_tree() {
+        let tree: MerkleTree = core::iter::empty::<&[u8]>().collect();
+        assert!(tree.is_empty());
+        assert!(tree.root().is_none());
     }
 }

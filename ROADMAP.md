@@ -13,8 +13,8 @@ This project will evolve from a simple educational Merkle tree to a more feature
 9. Add `TryFrom` and safe conversions for byte arrays [x]
 10. Add a simple CLI demo (build tree, print root, verify proof) [x]
 11. Add cargo `--features` matrix to CI (std/no_std) [x]
-12. Split modules: hashing, tree, proof, errors
-13. Add `FromIterator` impls for MerkleTree
+12. Split modules: hashing, tree, proof, errors [x]
+13. Add `FromIterator` impls for MerkleTree [x]
 14. Add `Arbitrary`/quickcheck-style property tests
 15. Fuzz basic operations (cargo-fuzz)
 16. Add incremental append (rebuild-on-append) API

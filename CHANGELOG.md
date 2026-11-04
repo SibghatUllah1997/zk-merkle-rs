@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-04
+
+- Split hashing, errors, proofs, and the tree into dedicated modules
+- Collect leaves into a MerkleTree via FromIterator for byte slices and strings
+- Crate-root exports stay the same, so existing callers keep compiling
+
 ## 2026-11-03
 
 - Add a `merkle` demo CLI to build a tree, print the root, and prove/verify inclusion
