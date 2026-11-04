@@ -36,13 +36,18 @@ extern crate alloc;
 #[cfg(not(feature = "std"))]
 use alloc::{string::String, vec::Vec};
 
-use sha2::{Digest, Sha256};
-
 /// Command-line demo: build a tree, print the root, prove and verify inclusion.
 ///
 /// Available when the `std` feature is enabled (the crate default).
 #[cfg(feature = "std")]
 pub mod cli;
+
+/// Domain-separated SHA-256 hashing and hex helpers for 32-byte digests.
+pub mod hashing;
+
+pub use hashing::{
+    from_hex, hash_leaf, hash_nodes, to_hex, to_hex32, try_from_hex32, LEAF_PREFIX, NODE_PREFIX,
+};
 
 /// Error returned when converting variable-length byte slices into fixed-size arrays.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,9 +80,6 @@ pub fn try_array32(bytes: &[u8]) -> Result<[u8; 32], LengthError> {
     out.copy_from_slice(bytes);
     Ok(out)
 }
-
-const LEAF_PREFIX: u8 = 0x00;
-const NODE_PREFIX: u8 = 0x01;
 
 /// Error returned when decoding a hex string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -114,89 +116,6 @@ impl std::error::Error for HexError {}
 
 #[cfg(feature = "std")]
 impl std::error::Error for LengthError {}
-
-fn hex_nibble(byte: u8, index: usize) -> Result<u8, HexError> {
-    let value = match byte {
-        b'0'..=b'9' => byte - b'0',
-        b'a'..=b'f' => byte - b'a' + 10,
-        b'A'..=b'F' => byte - b'A' + 10,
-        _ => {
-            return Err(HexError::InvalidDigit {
-                index,
-                digit: char::from(byte),
-            });
-        }
-    };
-    Ok(value)
-}
-
-/// Decode a hex string into bytes.
-///
-/// Accepts optional `0x`/`0X` prefixes and both lower- and upper-case digits.
-/// Surrounding whitespace is ignored; interior whitespace is not.
-pub fn from_hex(input: &str) -> Result<Vec<u8>, HexError> {
-    let trimmed = input.trim();
-    let hex_body = trimmed
-        .strip_prefix("0x")
-        .or_else(|| trimmed.strip_prefix("0X"))
-        .unwrap_or(trimmed);
-    if hex_body.len() % 2 != 0 {
-        return Err(HexError::OddLength {
-            chars: hex_body.len(),
-        });
-    }
-    let bytes = hex_body.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len() / 2);
-    let mut index = 0;
-    while index < bytes.len() {
-        let hi = hex_nibble(bytes[index], index)?;
-        let lo = hex_nibble(bytes[index + 1], index + 1)?;
-        out.push((hi << 4) | lo);
-        index += 2;
-    }
-    Ok(out)
-}
-
-/// Decode a hex string into a 32-byte array.
-pub fn try_from_hex32(input: &str) -> Result<[u8; 32], HexError> {
-    let bytes = from_hex(input)?;
-    if bytes.len() != 32 {
-        return Err(HexError::UnexpectedLen {
-            expected: 32,
-            found: bytes.len(),
-        });
-    }
-    let mut out = [0u8; 32];
-    out.copy_from_slice(&bytes);
-    Ok(out)
-}
-
-/// Encode bytes as lowercase hex string.
-pub fn to_hex(bytes: &[u8]) -> String {
-    hex::encode(bytes)
-}
-
-/// Encode a 32-byte array as lowercase hex string.
-pub fn to_hex32(bytes: &[u8; 32]) -> String {
-    hex::encode(bytes)
-}
-
-/// Compute a leaf hash as H(0x00 || data).
-pub fn hash_leaf(data: &[u8]) -> [u8; 32] {
-    let mut hasher = Sha256::new();
-    hasher.update([LEAF_PREFIX]);
-    hasher.update(data);
-    hasher.finalize().into()
-}
-
-/// Compute a parent/internal node hash as H(0x01 || left || right).
-pub fn hash_nodes(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
-    let mut hasher = Sha256::new();
-    hasher.update([NODE_PREFIX]);
-    hasher.update(left);
-    hasher.update(right);
-    hasher.finalize().into()
-}
 
 /// Direction of a sibling node in a proof step.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -619,8 +538,7 @@ pub fn verify_inclusion(leaf_data: &[u8], steps: &[ProofStep], expected_root: [u
 mod tests {
     use super::*;
     #[cfg(not(feature = "std"))]
-    use alloc::{format, string::String, string::ToString, vec::Vec};
-    use core::fmt::Write as _;
+    use alloc::{format, string::String, string::ToString};
 
     #[test]
     fn try_array32_accepts_exact_len_and_rejects_others() {
@@ -662,15 +580,6 @@ mod tests {
         assert!(MerkleRoot::try_from(&bad[..]).is_err());
     }
 
-    // Local helper retained for regression sanity.
-    fn to_hex(bytes: &[u8]) -> String {
-        let mut s = String::with_capacity(bytes.len() * 2);
-        for b in bytes {
-            write!(&mut s, "{:02x}", b).expect("write! to String never fails");
-        }
-        s
-    }
-
     #[test]
     fn root_and_proofs_even_leaves() {
         let leaves = ["a", "b", "c", "d"].map(|s| s.as_bytes().to_vec());
@@ -682,7 +591,7 @@ mod tests {
             assert!(proof.verify(root), "proof failed at index {i}");
         }
         // Basic sanity: non-empty hex string
-        assert!(!to_hex(&root).is_empty());
+        assert!(!to_hex32(&root).is_empty());
     }
 
     #[test]
@@ -764,36 +673,6 @@ mod tests {
         assert_eq!(raw, *typed.as_bytes());
         assert_eq!(typed.to_hex(), to_hex32(&raw));
         assert_eq!(typed.to_string(), to_hex32(&raw));
-    }
-
-    #[test]
-    fn from_hex_roundtrips_and_rejects_bad_input() {
-        let original = [0x00, 0xab, 0xcd, 0xef, 0x12, 0x34];
-        let encoded = to_hex(&original);
-        assert_eq!(from_hex(&encoded).expect("decode"), original);
-        assert_eq!(from_hex("00ABCDEF1234").expect("upper"), original);
-        assert_eq!(from_hex("  0x00abcdef1234  ").expect("prefix"), original);
-        assert_eq!(from_hex("0X00abcdef1234").expect("0X"), original);
-        assert_eq!(from_hex("").expect("empty"), Vec::<u8>::new());
-
-        assert!(matches!(
-            from_hex("abc"),
-            Err(HexError::OddLength { chars: 3 })
-        ));
-        assert!(matches!(
-            from_hex("zz"),
-            Err(HexError::InvalidDigit {
-                index: 0,
-                digit: 'z'
-            })
-        ));
-        assert!(matches!(
-            from_hex("0x0g"),
-            Err(HexError::InvalidDigit {
-                index: 1,
-                digit: 'g'
-            })
-        ));
     }
 
     #[test]
