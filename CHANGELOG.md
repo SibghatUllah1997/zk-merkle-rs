@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-05 (append)
+
+- Add `MerkleTree::append`, `append_hashed`, and `extend_hashed` for growing a tree in place
+- Implement `Extend` so many leaves can be added with a single rebuild
+- Appended trees always match a tree built from scratch over the same leaves
+
 ## 2026-11-05
 
 - Build trees from already-hashed leaves, matching the raw-data constructor
