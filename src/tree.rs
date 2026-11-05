@@ -154,6 +154,42 @@ impl MerkleTree {
         Self { layers }
     }
 
+    /// Append one raw leaf and return its index.
+    ///
+    /// The leaf is hashed as `H(0x00 || data)`. Upper layers are rebuilt from
+    /// the leaf layer, so each call costs O(n) hashes; use [`Extend`] to add
+    /// many leaves with a single rebuild. The result always equals a tree
+    /// built from scratch over the same leaves.
+    ///
+    /// ```
+    /// use merkle_tree::MerkleTree;
+    ///
+    /// let mut tree = MerkleTree::from_leaves(["a", "b"]);
+    /// let index = tree.append("c");
+    /// assert_eq!(index, 2);
+    /// assert_eq!(tree.root(), MerkleTree::from_leaves(["a", "b", "c"]).root());
+    /// ```
+    pub fn append<T: AsRef<[u8]>>(&mut self, leaf: T) -> usize {
+        self.append_hashed(hash_leaf(leaf.as_ref()))
+    }
+
+    /// Append one already-hashed leaf (`H(0x00 || data)`) and return its index.
+    pub fn append_hashed(&mut self, hash: [u8; 32]) -> usize {
+        let index = self.leaf_count();
+        self.extend_hashed(core::iter::once(hash));
+        index
+    }
+
+    /// Append many already-hashed leaves with a single rebuild.
+    pub fn extend_hashed<I>(&mut self, hashes: I)
+    where
+        I: IntoIterator<Item = [u8; 32]>,
+    {
+        let mut leaf_hashes = self.layers.drain(..).next().unwrap_or_default();
+        leaf_hashes.extend(hashes);
+        *self = Self::from_leaf_hashes(leaf_hashes);
+    }
+
     /// `true` when the tree was built from no leaves.
     pub fn is_empty(&self) -> bool {
         self.layers.is_empty()
@@ -262,12 +298,58 @@ impl<T: AsRef<[u8]>> core::iter::FromIterator<T> for MerkleTree {
     }
 }
 
+impl<T: AsRef<[u8]>> core::iter::Extend<T> for MerkleTree {
+    /// Hash each item as a leaf and append it, rebuilding the upper layers once.
+    fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
+        self.extend_hashed(iter.into_iter().map(|x| hash_leaf(x.as_ref())));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::proof::{parse_proof_steps, verify_inclusion};
     #[cfg(not(feature = "std"))]
     use alloc::{format, string::String, string::ToString};
+
+    #[test]
+    fn append_matches_fresh_build_and_returns_index() {
+        let mut tree = MerkleTree::from_leaves(core::iter::empty::<&[u8]>());
+        for (i, leaf) in ["a", "b", "c", "d", "e"].iter().enumerate() {
+            assert_eq!(tree.append(leaf), i);
+            let fresh = MerkleTree::from_leaves(["a", "b", "c", "d", "e"].iter().take(i + 1));
+            assert_eq!(tree.root(), fresh.root());
+            assert_eq!(tree.layer_count(), fresh.layer_count());
+        }
+    }
+
+    #[test]
+    fn proofs_stay_valid_after_append() {
+        let mut tree = MerkleTree::from_leaves(["a", "b", "c"]);
+        tree.append("d");
+        tree.append_hashed(hash_leaf(b"e"));
+        let root = tree.root().expect("root");
+        for i in 0..tree.leaf_count() {
+            assert!(tree.prove(i).expect("proof").verify(root));
+        }
+        assert_eq!(tree.leaf_count(), 5);
+    }
+
+    #[test]
+    fn extend_adds_many_and_empty_extend_is_a_noop() {
+        let mut tree = MerkleTree::from_leaves(["a", "b"]);
+        let before = tree.root();
+        tree.extend(core::iter::empty::<&str>());
+        assert_eq!(tree.root(), before);
+        tree.extend(["c", "d", "e"]);
+        assert_eq!(
+            tree.root(),
+            MerkleTree::from_leaves(["a", "b", "c", "d", "e"]).root()
+        );
+        let mut empty = MerkleTree::from_leaves(core::iter::empty::<&str>());
+        empty.extend(core::iter::empty::<&str>());
+        assert!(empty.is_empty());
+    }
 
     #[test]
     fn merkle_root_try_from_slice_and_from_array() {
