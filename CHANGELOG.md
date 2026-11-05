@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-05
+
+- Build trees from already-hashed leaves, matching the raw-data constructor
+- Add proptest coverage for hashing, tree construction, and inclusion proofs
+- Add cargo-fuzz targets for prove/verify and proof-step parsing
+
 ## 2026-11-04
 
 - Split hashing, errors, proofs, and the tree into dedicated modules
