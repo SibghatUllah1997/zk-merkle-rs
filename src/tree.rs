@@ -111,7 +111,29 @@ impl MerkleTree {
     {
         let leaf_hashes: Vec<[u8; 32]> =
             leaves.into_iter().map(|x| hash_leaf(x.as_ref())).collect();
-        Self::from_leaf_hashes(leaf_hashes)
+        Self::from_hashed_leaves(leaf_hashes)
+    }
+
+    /// Build a tree from leaf hashes that are already domain-separated
+    /// (`H(0x00 || data)`).
+    ///
+    /// Use this when callers hashed leaves themselves with [`hash_leaf`] and do
+    /// not need the raw preimage stored in the tree. Empty input yields an
+    /// empty tree, matching [`Self::from_leaves`].
+    ///
+    /// ```
+    /// use merkle_tree::{hash_leaf, MerkleTree};
+    ///
+    /// let hashes = [hash_leaf(b"a"), hash_leaf(b"b")];
+    /// let from_raw = MerkleTree::from_leaves(["a", "b"]);
+    /// let from_hashed = MerkleTree::from_hashed_leaves(hashes);
+    /// assert_eq!(from_raw.root(), from_hashed.root());
+    /// ```
+    pub fn from_hashed_leaves<I>(hashes: I) -> Self
+    where
+        I: IntoIterator<Item = [u8; 32]>,
+    {
+        Self::from_leaf_hashes(hashes.into_iter().collect())
     }
 
     fn from_leaf_hashes(leaf_hashes: Vec<[u8; 32]>) -> Self {
@@ -422,6 +444,40 @@ mod tests {
 
         let single = MerkleTree::from_leaves(["only"].map(|s| s.as_bytes()));
         assert!(single.prove(0).unwrap().steps_spec().is_empty());
+    }
+
+    #[test]
+    fn from_hashed_leaves_matches_from_leaves() {
+        let leaves = ["a", "b", "c", "d"];
+        let hashes = leaves.map(|s| hash_leaf(s.as_bytes()));
+        let from_raw = MerkleTree::from_leaves(leaves);
+        let from_hashed = MerkleTree::from_hashed_leaves(hashes);
+        assert_eq!(from_hashed.root(), from_raw.root());
+        assert_eq!(from_hashed.leaf_count(), from_raw.leaf_count());
+        assert_eq!(from_hashed.leaf_infos(), from_raw.leaf_infos());
+        let root = from_hashed.root().expect("root");
+        for (i, expected_hash) in hashes.iter().enumerate() {
+            let proof = from_hashed.prove(i).expect("proof");
+            assert!(proof.verify(root));
+            assert_eq!(proof.leaf_hash, *expected_hash);
+        }
+    }
+
+    #[test]
+    fn from_hashed_leaves_empty_and_single() {
+        let empty = MerkleTree::from_hashed_leaves(core::iter::empty::<[u8; 32]>());
+        assert!(empty.is_empty());
+        assert!(empty.root().is_none());
+        assert!(empty.prove(0).is_none());
+
+        let only = hash_leaf(b"only");
+        let single = MerkleTree::from_hashed_leaves([only]);
+        assert_eq!(single.leaf_count(), 1);
+        assert_eq!(single.layer_count(), 1);
+        assert_eq!(single.root(), Some(only));
+        let proof = single.prove(0).expect("proof");
+        assert!(proof.steps.is_empty());
+        assert!(proof.verify(only));
     }
 
     #[test]
