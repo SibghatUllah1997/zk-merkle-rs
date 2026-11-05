@@ -1,0 +1,29 @@
+[package]
+name = "merkle-tree-fuzz"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+merkle-tree = { path = ".." }
+
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "tree_prove"
+path = "fuzz_targets/tree_prove.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_proof"
+path = "fuzz_targets/parse_proof.rs"
+test = false
+doc = false
+bench = false
