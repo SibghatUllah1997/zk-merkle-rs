@@ -17,7 +17,7 @@ This project will evolve from a simple educational Merkle tree to a more feature
 13. Add `FromIterator` impls for MerkleTree [x]
 14. Add `Arbitrary`/quickcheck-style property tests [x]
 15. Fuzz basic operations (cargo-fuzz) [x]
-16. Add incremental append (rebuild-on-append) API
+16. Add incremental append (rebuild-on-append) API [x]
 17. Provide multiproof skeleton (no optimization)
 18. Add Poseidon/Rescue skeletons behind feature flags (no impl yet)
 19. Integrate blake3 as an alternative hash (feature flag)
