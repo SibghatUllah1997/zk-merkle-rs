@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-09 (blake3)
+
+- Add an optional `blake3` feature with domain-separated BLAKE3 leaf and node hashing
+- Build trees with a chosen algorithm and verify proofs and multiproofs with `verify_with`
+- Trees remember their algorithm, so appends keep hashing the same way; SHA-256 stays the default
+
 ## 2026-11-09
 
 - Add a naive multiproof API that bundles per-leaf inclusion paths without sharing siblings

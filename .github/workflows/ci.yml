@@ -50,6 +50,8 @@ jobs:
             flags: --all-features
           - name: no_std+poseidon+rescue
             flags: --no-default-features --features poseidon,rescue
+          - name: no_std+blake3
+            flags: --no-default-features --features blake3
     steps:
       - name: Checkout
         uses: actions/checkout@v4
