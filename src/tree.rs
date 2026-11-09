@@ -7,8 +7,8 @@
 #[cfg(not(feature = "std"))]
 use alloc::{string::String, vec::Vec};
 
-use crate::error::{try_array32, HexError, LengthError};
-use crate::hashing::{hash_leaf, hash_nodes, to_hex32, try_from_hex32};
+use crate::error::{try_array32, HashNotImplemented, HexError, LengthError};
+use crate::hashing::{to_hex32, try_from_hex32, HashAlgorithm, TreeHasher};
 use crate::proof::{InclusionProof, IndexedInclusionProof, MultiProof, ProofStep, SiblingSide};
 
 /// Minimal per-leaf metadata: the leaf's index and its hashed value.
@@ -79,14 +79,19 @@ impl core::fmt::Display for MerkleRoot {
     }
 }
 
-/// A Merkle tree built using SHA-256 with explicit domain separation.
+/// A Merkle tree with explicit domain separation.
+///
+/// SHA-256 is the default. With the `blake3` feature, trees can also be built
+/// over BLAKE3 via [`MerkleTree::try_from_leaves_with`]; the chosen algorithm
+/// is remembered so appends keep hashing the same way.
 #[derive(Debug, Clone)]
 pub struct MerkleTree {
     /// layers[0] = leaf layer (hashed); layers.last()[0] = root
     layers: Vec<Vec<[u8; 32]>>,
+    hasher: TreeHasher,
 }
 
-fn parent_layer(prev: &[[u8; 32]]) -> Vec<[u8; 32]> {
+fn parent_layer(hasher: TreeHasher, prev: &[[u8; 32]]) -> Vec<[u8; 32]> {
     let mut next = Vec::with_capacity((prev.len() + 1) / 2);
     let mut i = 0;
     while i < prev.len() {
@@ -96,7 +101,7 @@ fn parent_layer(prev: &[[u8; 32]]) -> Vec<[u8; 32]> {
         } else {
             prev[i]
         };
-        next.push(hash_nodes(&left, &right));
+        next.push(hasher.nodes(&left, &right));
         i += 2;
     }
     next
@@ -109,15 +114,68 @@ impl MerkleTree {
         I: IntoIterator<Item = T>,
         T: AsRef<[u8]>,
     {
-        let leaf_hashes: Vec<[u8; 32]> =
-            leaves.into_iter().map(|x| hash_leaf(x.as_ref())).collect();
-        Self::from_hashed_leaves(leaf_hashes)
+        Self::from_leaves_inner(TreeHasher::Sha256, leaves)
+    }
+
+    /// Build a tree from raw leaf data using `algorithm`.
+    ///
+    /// Fails with [`HashNotImplemented`] for placeholder algorithms such as
+    /// Poseidon or Rescue. With [`HashAlgorithm::Sha256`] this equals
+    /// [`Self::from_leaves`].
+    ///
+    /// ```
+    /// use merkle_tree::{HashAlgorithm, MerkleTree};
+    ///
+    /// let tree = MerkleTree::try_from_leaves_with(HashAlgorithm::Sha256, ["a", "b"])?;
+    /// assert_eq!(tree.root(), MerkleTree::from_leaves(["a", "b"]).root());
+    /// assert_eq!(tree.algorithm(), HashAlgorithm::Sha256);
+    /// # Ok::<(), merkle_tree::HashNotImplemented>(())
+    /// ```
+    pub fn try_from_leaves_with<I, T>(
+        algorithm: HashAlgorithm,
+        leaves: I,
+    ) -> Result<Self, HashNotImplemented>
+    where
+        I: IntoIterator<Item = T>,
+        T: AsRef<[u8]>,
+    {
+        Ok(Self::from_leaves_inner(TreeHasher::new(algorithm)?, leaves))
+    }
+
+    /// Build a tree from leaf hashes that were produced with `algorithm`
+    /// (for example with [`crate::hash_leaf_with`]).
+    pub fn try_from_hashed_leaves_with<I>(
+        algorithm: HashAlgorithm,
+        hashes: I,
+    ) -> Result<Self, HashNotImplemented>
+    where
+        I: IntoIterator<Item = [u8; 32]>,
+    {
+        let hasher = TreeHasher::new(algorithm)?;
+        Ok(Self::from_leaf_hashes(hasher, hashes.into_iter().collect()))
+    }
+
+    fn from_leaves_inner<I, T>(hasher: TreeHasher, leaves: I) -> Self
+    where
+        I: IntoIterator<Item = T>,
+        T: AsRef<[u8]>,
+    {
+        let leaf_hashes: Vec<[u8; 32]> = leaves
+            .into_iter()
+            .map(|x| hasher.leaf(x.as_ref()))
+            .collect();
+        Self::from_leaf_hashes(hasher, leaf_hashes)
+    }
+
+    /// Hash algorithm used for every leaf and node in this tree.
+    pub fn algorithm(&self) -> HashAlgorithm {
+        self.hasher.algorithm()
     }
 
     /// Build a tree from leaf hashes that are already domain-separated
     /// (`H(0x00 || data)`).
     ///
-    /// Use this when callers hashed leaves themselves with [`hash_leaf`] and do
+    /// Use this when callers hashed leaves themselves with [`crate::hash_leaf`] and do
     /// not need the raw preimage stored in the tree. Empty input yields an
     /// empty tree, matching [`Self::from_leaves`].
     ///
@@ -133,30 +191,33 @@ impl MerkleTree {
     where
         I: IntoIterator<Item = [u8; 32]>,
     {
-        Self::from_leaf_hashes(hashes.into_iter().collect())
+        Self::from_leaf_hashes(TreeHasher::Sha256, hashes.into_iter().collect())
     }
 
-    fn from_leaf_hashes(leaf_hashes: Vec<[u8; 32]>) -> Self {
+    fn from_leaf_hashes(hasher: TreeHasher, leaf_hashes: Vec<[u8; 32]>) -> Self {
         if leaf_hashes.is_empty() {
-            return Self { layers: Vec::new() };
+            return Self {
+                layers: Vec::new(),
+                hasher,
+            };
         }
         let mut layers = Vec::new();
         layers.push(leaf_hashes);
         loop {
             match layers.last() {
                 Some(prev) if prev.len() > 1 => {
-                    let next = parent_layer(prev);
+                    let next = parent_layer(hasher, prev);
                     layers.push(next);
                 }
                 _ => break,
             }
         }
-        Self { layers }
+        Self { layers, hasher }
     }
 
     /// Append one raw leaf and return its index.
     ///
-    /// The leaf is hashed as `H(0x00 || data)`. Upper layers are rebuilt from
+    /// The leaf is hashed as `H(0x00 || data)` with the tree's algorithm. Upper layers are rebuilt from
     /// the leaf layer, so each call costs O(n) hashes; use [`Extend`] to add
     /// many leaves with a single rebuild. The result always equals a tree
     /// built from scratch over the same leaves.
@@ -170,7 +231,7 @@ impl MerkleTree {
     /// assert_eq!(tree.root(), MerkleTree::from_leaves(["a", "b", "c"]).root());
     /// ```
     pub fn append<T: AsRef<[u8]>>(&mut self, leaf: T) -> usize {
-        self.append_hashed(hash_leaf(leaf.as_ref()))
+        self.append_hashed(self.hasher.leaf(leaf.as_ref()))
     }
 
     /// Append one already-hashed leaf (`H(0x00 || data)`) and return its index.
@@ -187,7 +248,7 @@ impl MerkleTree {
     {
         let mut leaf_hashes = self.layers.drain(..).next().unwrap_or_default();
         leaf_hashes.extend(hashes);
-        *self = Self::from_leaf_hashes(leaf_hashes);
+        *self = Self::from_leaf_hashes(self.hasher, leaf_hashes);
     }
 
     /// `true` when the tree was built from no leaves.
@@ -335,13 +396,15 @@ impl<T: AsRef<[u8]>> core::iter::FromIterator<T> for MerkleTree {
 impl<T: AsRef<[u8]>> core::iter::Extend<T> for MerkleTree {
     /// Hash each item as a leaf and append it, rebuilding the upper layers once.
     fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
-        self.extend_hashed(iter.into_iter().map(|x| hash_leaf(x.as_ref())));
+        let hasher = self.hasher;
+        self.extend_hashed(iter.into_iter().map(|x| hasher.leaf(x.as_ref())));
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hashing::hash_leaf;
     use crate::proof::{parse_proof_steps, verify_inclusion};
     #[cfg(not(feature = "std"))]
     use alloc::{format, string::String, string::ToString, vec};
@@ -679,5 +742,54 @@ mod tests {
         assert!(multi.verify(root));
         assert_eq!(multi.proofs[0].proof, tree.prove(0).unwrap());
         assert_eq!(multi.proofs[1].proof, tree.prove(2).unwrap());
+    }
+
+    #[test]
+    fn try_from_leaves_with_sha256_matches_default_constructors() {
+        let leaves = ["a", "b", "c"];
+        let tree = MerkleTree::try_from_leaves_with(HashAlgorithm::Sha256, leaves).expect("sha");
+        assert_eq!(tree.algorithm(), HashAlgorithm::Sha256);
+        assert_eq!(tree.root(), MerkleTree::from_leaves(leaves).root());
+        assert_eq!(
+            MerkleTree::from_leaves(leaves).algorithm(),
+            HashAlgorithm::Sha256
+        );
+        let hashed = MerkleTree::try_from_hashed_leaves_with(
+            HashAlgorithm::Sha256,
+            leaves.map(|l| hash_leaf(l.as_bytes())),
+        )
+        .expect("sha");
+        assert_eq!(hashed.root(), tree.root());
+    }
+
+    #[cfg(feature = "poseidon")]
+    #[test]
+    fn placeholder_algorithms_cannot_build_trees() {
+        let err =
+            MerkleTree::try_from_leaves_with(HashAlgorithm::Poseidon, ["a"]).expect_err("stub");
+        assert_eq!(err, HashNotImplemented::new("poseidon"));
+        let empty: [[u8; 32]; 0] = [];
+        assert!(MerkleTree::try_from_hashed_leaves_with(HashAlgorithm::Poseidon, empty).is_err());
+    }
+
+    #[cfg(feature = "blake3")]
+    #[test]
+    fn blake3_tree_keeps_its_algorithm_across_appends() {
+        use crate::hashing::{blake3_hash_leaf, blake3_hash_nodes};
+        let mut tree = MerkleTree::try_from_leaves_with(HashAlgorithm::Blake3, ["a"]).expect("b3");
+        assert_eq!(tree.root(), Some(blake3_hash_leaf(b"a")));
+        tree.append("b");
+        let expected = blake3_hash_nodes(&blake3_hash_leaf(b"a"), &blake3_hash_leaf(b"b"));
+        assert_eq!(tree.root(), Some(expected));
+        tree.extend(["c", "d", "e"]);
+        let rebuilt =
+            MerkleTree::try_from_leaves_with(HashAlgorithm::Blake3, ["a", "b", "c", "d", "e"])
+                .expect("b3");
+        assert_eq!(tree.root(), rebuilt.root());
+        assert_eq!(tree.algorithm(), HashAlgorithm::Blake3);
+        assert_ne!(
+            tree.root(),
+            MerkleTree::from_leaves(["a", "b", "c", "d", "e"]).root()
+        );
     }
 }

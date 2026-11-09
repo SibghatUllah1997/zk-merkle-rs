@@ -98,6 +98,58 @@ pub fn hash_nodes(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
     hasher.finalize().into()
 }
 
+/// A digest backend that is actually implemented.
+///
+/// Trees and proof verifiers hold one of these instead of a raw
+/// [`HashAlgorithm`], so placeholder algorithms are rejected once at the
+/// boundary and the hot hashing loops stay infallible.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TreeHasher {
+    Sha256,
+    #[cfg(feature = "blake3")]
+    Blake3,
+}
+
+impl TreeHasher {
+    /// Pick the backend for `algorithm`, or report that it has no code yet.
+    pub(crate) fn new(algorithm: HashAlgorithm) -> Result<Self, HashNotImplemented> {
+        match algorithm {
+            HashAlgorithm::Sha256 => Ok(Self::Sha256),
+            #[cfg(feature = "blake3")]
+            HashAlgorithm::Blake3 => Ok(Self::Blake3),
+            #[allow(unreachable_patterns)]
+            other => Err(HashNotImplemented::new(other.name())),
+        }
+    }
+
+    /// The public algorithm this backend implements.
+    pub(crate) const fn algorithm(self) -> HashAlgorithm {
+        match self {
+            Self::Sha256 => HashAlgorithm::Sha256,
+            #[cfg(feature = "blake3")]
+            Self::Blake3 => HashAlgorithm::Blake3,
+        }
+    }
+
+    /// Domain-separated leaf hash.
+    pub(crate) fn leaf(self, data: &[u8]) -> [u8; 32] {
+        match self {
+            Self::Sha256 => hash_leaf(data),
+            #[cfg(feature = "blake3")]
+            Self::Blake3 => blake3_hash_leaf(data),
+        }
+    }
+
+    /// Domain-separated parent hash.
+    pub(crate) fn nodes(self, left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
+        match self {
+            Self::Sha256 => hash_nodes(left, right),
+            #[cfg(feature = "blake3")]
+            Self::Blake3 => blake3_hash_nodes(left, right),
+        }
+    }
+}
+
 /// Hash a leaf with `algorithm`. SHA-256 always succeeds.
 pub fn hash_leaf_with(
     algorithm: HashAlgorithm,
@@ -346,6 +398,31 @@ mod tests {
         as_node.extend_from_slice(&payload);
         let as_node: [u8; 32] = blake3::hash(&as_node).into();
         assert_ne!(blake3_hash_leaf(&payload), as_node);
+    }
+
+    #[test]
+    fn tree_hasher_accepts_implemented_algorithms_only() {
+        let sha = TreeHasher::new(HashAlgorithm::Sha256).expect("sha256");
+        assert_eq!(sha.algorithm(), HashAlgorithm::Sha256);
+        assert_eq!(sha.leaf(b"abc"), hash_leaf(b"abc"));
+        #[cfg(feature = "blake3")]
+        {
+            let b3 = TreeHasher::new(HashAlgorithm::Blake3).expect("blake3");
+            assert_eq!(b3.algorithm(), HashAlgorithm::Blake3);
+            assert_eq!(b3.leaf(b"abc"), blake3_hash_leaf(b"abc"));
+            let (l, r) = (b3.leaf(b"a"), b3.leaf(b"b"));
+            assert_eq!(b3.nodes(&l, &r), blake3_hash_nodes(&l, &r));
+        }
+        #[cfg(feature = "poseidon")]
+        assert_eq!(
+            TreeHasher::new(HashAlgorithm::Poseidon),
+            Err(HashNotImplemented::new("poseidon"))
+        );
+        #[cfg(feature = "rescue")]
+        assert_eq!(
+            TreeHasher::new(HashAlgorithm::Rescue),
+            Err(HashNotImplemented::new("rescue"))
+        );
     }
 
     #[cfg(feature = "blake3")]

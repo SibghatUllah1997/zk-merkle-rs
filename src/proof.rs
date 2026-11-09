@@ -13,8 +13,9 @@
 #[cfg(not(feature = "std"))]
 use alloc::{string::String, vec::Vec};
 
+use crate::error::HashNotImplemented;
 use crate::error::ParseStepsError;
-use crate::hashing::{hash_leaf, hash_nodes, to_hex32, try_from_hex32};
+use crate::hashing::{to_hex32, try_from_hex32, HashAlgorithm, TreeHasher};
 
 /// Direction of a sibling node in a proof step.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -104,13 +105,28 @@ pub struct InclusionProof {
 }
 
 impl InclusionProof {
-    /// Verify this proof against an expected root.
+    /// Verify this SHA-256 proof against an expected root.
     pub fn verify(&self, expected_root: [u8; 32]) -> bool {
+        self.verify_inner(TreeHasher::Sha256, expected_root)
+    }
+
+    /// Verify this proof against `expected_root` using `algorithm`.
+    ///
+    /// Returns `Err` only for placeholder algorithms with no implementation.
+    pub fn verify_with(
+        &self,
+        algorithm: HashAlgorithm,
+        expected_root: [u8; 32],
+    ) -> Result<bool, HashNotImplemented> {
+        Ok(self.verify_inner(TreeHasher::new(algorithm)?, expected_root))
+    }
+
+    pub(crate) fn verify_inner(&self, hasher: TreeHasher, expected_root: [u8; 32]) -> bool {
         let mut acc = self.leaf_hash;
         for step in &self.steps {
             acc = match step.side {
-                SiblingSide::Left => hash_nodes(&step.sibling, &acc),
-                SiblingSide::Right => hash_nodes(&acc, &step.sibling),
+                SiblingSide::Left => hasher.nodes(&step.sibling, &acc),
+                SiblingSide::Right => hasher.nodes(&acc, &step.sibling),
             };
         }
         acc == expected_root
@@ -168,9 +184,18 @@ pub struct IndexedInclusionProof {
 }
 
 impl IndexedInclusionProof {
-    /// Verify this proof against an expected root.
+    /// Verify this SHA-256 proof against an expected root.
     pub fn verify(&self, expected_root: [u8; 32]) -> bool {
         self.proof.verify(expected_root)
+    }
+
+    /// Verify this proof against `expected_root` using `algorithm`.
+    pub fn verify_with(
+        &self,
+        algorithm: HashAlgorithm,
+        expected_root: [u8; 32],
+    ) -> Result<bool, HashNotImplemented> {
+        self.proof.verify_with(algorithm, expected_root)
     }
 
     /// Leaf hash as lowercase hex.
@@ -217,7 +242,22 @@ impl MultiProof {
     ///
     /// An empty bundle is treated as vacuously true for any root.
     pub fn verify(&self, expected_root: [u8; 32]) -> bool {
-        self.proofs.iter().all(|item| item.verify(expected_root))
+        self.verify_inner(TreeHasher::Sha256, expected_root)
+    }
+
+    /// Verify every contained proof against `expected_root` using `algorithm`.
+    pub fn verify_with(
+        &self,
+        algorithm: HashAlgorithm,
+        expected_root: [u8; 32],
+    ) -> Result<bool, HashNotImplemented> {
+        Ok(self.verify_inner(TreeHasher::new(algorithm)?, expected_root))
+    }
+
+    fn verify_inner(&self, hasher: TreeHasher, expected_root: [u8; 32]) -> bool {
+        self.proofs
+            .iter()
+            .all(|item| item.proof.verify_inner(hasher, expected_root))
     }
 }
 
@@ -249,6 +289,37 @@ pub fn verify_inclusion_many<'a, I>(leaves: I, proof: &MultiProof, expected_root
 where
     I: IntoIterator<Item = (usize, &'a [u8])>,
 {
+    verify_inclusion_many_inner(TreeHasher::Sha256, leaves, proof, expected_root)
+}
+
+/// Like [`verify_inclusion_many`], but hashes leaves and nodes with `algorithm`.
+pub fn verify_inclusion_many_with<'a, I>(
+    algorithm: HashAlgorithm,
+    leaves: I,
+    proof: &MultiProof,
+    expected_root: [u8; 32],
+) -> Result<bool, HashNotImplemented>
+where
+    I: IntoIterator<Item = (usize, &'a [u8])>,
+{
+    let hasher = TreeHasher::new(algorithm)?;
+    Ok(verify_inclusion_many_inner(
+        hasher,
+        leaves,
+        proof,
+        expected_root,
+    ))
+}
+
+fn verify_inclusion_many_inner<'a, I>(
+    hasher: TreeHasher,
+    leaves: I,
+    proof: &MultiProof,
+    expected_root: [u8; 32],
+) -> bool
+where
+    I: IntoIterator<Item = (usize, &'a [u8])>,
+{
     let mut count = 0usize;
     for (index, data) in leaves {
         let entry = match proof.proofs.get(count) {
@@ -258,7 +329,7 @@ where
         if entry.index != index {
             return false;
         }
-        if entry.proof.leaf_hash != hash_leaf(data) {
+        if entry.proof.leaf_hash != hasher.leaf(data) {
             return false;
         }
         count += 1;
@@ -266,21 +337,47 @@ where
     if count != proof.proofs.len() {
         return false;
     }
-    proof.verify(expected_root)
+    proof.verify_inner(hasher, expected_root)
 }
 
 /// Verify an inclusion proof using the original leaf data and expected root.
 pub fn verify_inclusion(leaf_data: &[u8], steps: &[ProofStep], expected_root: [u8; 32]) -> bool {
+    verify_inclusion_inner(TreeHasher::Sha256, leaf_data, steps, expected_root)
+}
+
+/// Like [`verify_inclusion`], but hashes the leaf and path with `algorithm`.
+pub fn verify_inclusion_with(
+    algorithm: HashAlgorithm,
+    leaf_data: &[u8],
+    steps: &[ProofStep],
+    expected_root: [u8; 32],
+) -> Result<bool, HashNotImplemented> {
+    let hasher = TreeHasher::new(algorithm)?;
+    Ok(verify_inclusion_inner(
+        hasher,
+        leaf_data,
+        steps,
+        expected_root,
+    ))
+}
+
+fn verify_inclusion_inner(
+    hasher: TreeHasher,
+    leaf_data: &[u8],
+    steps: &[ProofStep],
+    expected_root: [u8; 32],
+) -> bool {
     let proof = InclusionProof {
-        leaf_hash: hash_leaf(leaf_data),
+        leaf_hash: hasher.leaf(leaf_data),
         steps: steps.to_vec(),
     };
-    proof.verify(expected_root)
+    proof.verify_inner(hasher, expected_root)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hashing::{hash_leaf, hash_nodes};
     #[cfg(not(feature = "std"))]
     use alloc::{format, string::String, string::ToString, vec, vec::Vec};
 

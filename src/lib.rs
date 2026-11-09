@@ -78,7 +78,8 @@ pub use hashing::{
 #[cfg(feature = "rescue")]
 pub use hashing::{rescue_hash_leaf, rescue_hash_nodes, RESCUE_LEAF_PREFIX, RESCUE_NODE_PREFIX};
 pub use proof::{
-    parse_proof_steps, verify_inclusion, verify_inclusion_many, verify_multiproof, InclusionProof,
-    IndexedInclusionProof, MultiProof, ProofStep, SiblingSide,
+    parse_proof_steps, verify_inclusion, verify_inclusion_many, verify_inclusion_many_with,
+    verify_inclusion_with, verify_multiproof, InclusionProof, IndexedInclusionProof, MultiProof,
+    ProofStep, SiblingSide,
 };
 pub use tree::{LeafInfo, MerkleRoot, MerkleTree};
