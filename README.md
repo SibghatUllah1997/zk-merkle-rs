@@ -20,6 +20,7 @@ Fast, tiny, no_std-friendly SHA-256 Merkle tree with inclusion proofs and a clea
 - Multiproofs: naive bundle of independent per-leaf paths (no sibling sharing yet)
 - serde support: optional `serde` derive on proof/root types
 - no_std: works without `std` (uses `alloc`) via feature flags
+- BLAKE3: the `blake3` feature adds `BLAKE3(0x00 || data)` / `BLAKE3(0x01 || l || r)` trees via `MerkleTree::try_from_leaves_with(HashAlgorithm::Blake3, ..)` and `verify_with`
 - Hash placeholders: `poseidon` and `rescue` features expose stubs that return `HashNotImplemented`
 - Clear domain separation:
   - Leaf hash: H(0x00 || data)
@@ -101,6 +102,7 @@ graph TD
 - Fuzzing (nightly): see `fuzz/README.md` (`cargo +nightly fuzz run tree_prove`)
 - no_std surface: `cargo test --no-default-features` and `cargo test --no-default-features --features serde`
 - Hash stubs: `cargo test --features poseidon,rescue` (functions return `HashNotImplemented`)
+- BLAKE3: `cargo test --features blake3` and `cargo test --no-default-features --features blake3`
 - Format and lints: `cargo fmt --all --check` and `cargo clippy --all-targets --all-features -D warnings`
 - Docs: `cargo doc --no-deps`
 

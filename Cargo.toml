@@ -15,6 +15,7 @@ categories = ["cryptography", "data-structures"]
 sha2 = { version = "0.10", default-features = false }
 hex = { version = "0.4", default-features = false, features = ["alloc"] }
 serde = { version = "1.0", default-features = false, features = ["derive", "alloc"], optional = true }
+blake3 = { version = "1.5", default-features = false, optional = true }
 
 [dev-dependencies]
 proptest = { version = "=1.5.0", default-features = false, features = ["std"] }
@@ -42,3 +43,5 @@ serde = ["dep:serde"]
 poseidon = []
 ## Placeholder Rescue hash API. Functions return HashNotImplemented.
 rescue = []
+## BLAKE3 as an alternative, fully implemented hash (no_std friendly).
+blake3 = ["dep:blake3"]
