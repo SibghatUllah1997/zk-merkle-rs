@@ -9,7 +9,7 @@ use alloc::{string::String, vec::Vec};
 
 use crate::error::{try_array32, HexError, LengthError};
 use crate::hashing::{hash_leaf, hash_nodes, to_hex32, try_from_hex32};
-use crate::proof::{InclusionProof, IndexedInclusionProof, ProofStep, SiblingSide};
+use crate::proof::{InclusionProof, IndexedInclusionProof, MultiProof, ProofStep, SiblingSide};
 
 /// Minimal per-leaf metadata: the leaf's index and its hashed value.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -289,6 +289,40 @@ impl MerkleTree {
         self.prove(index)
             .map(|proof| IndexedInclusionProof { index, proof })
     }
+
+    /// Generate a naive multiproof for `indices`.
+    ///
+    /// Each index is proved independently: overlapping siblings are repeated,
+    /// and duplicate indices each get their own copy of the same path. Returns
+    /// `None` if any index is out of range. An empty `indices` list yields an
+    /// empty [`MultiProof`], including on an empty tree.
+    ///
+    /// ```
+    /// use merkle_tree::MerkleTree;
+    ///
+    /// let tree = MerkleTree::from_leaves(["a", "b", "c", "d"]);
+    /// let root = tree.root().expect("root");
+    /// let multi = tree.prove_many([0, 3]).expect("in range");
+    /// assert_eq!(multi.indices(), vec![0, 3]);
+    /// assert!(multi.verify(root));
+    /// ```
+    pub fn prove_many<I>(&self, indices: I) -> Option<MultiProof>
+    where
+        I: IntoIterator<Item = usize>,
+    {
+        let mut proofs = Vec::new();
+        for index in indices {
+            proofs.push(self.prove_indexed(index)?);
+        }
+        Some(MultiProof { proofs })
+    }
+
+    /// Naive multiproof covering every leaf, in index order.
+    ///
+    /// Always succeeds: an empty tree yields an empty bundle.
+    pub fn prove_all(&self) -> MultiProof {
+        self.prove_many(0..self.leaf_count()).unwrap_or_default()
+    }
 }
 
 impl<T: AsRef<[u8]>> core::iter::FromIterator<T> for MerkleTree {
@@ -310,7 +344,7 @@ mod tests {
     use super::*;
     use crate::proof::{parse_proof_steps, verify_inclusion};
     #[cfg(not(feature = "std"))]
-    use alloc::{format, string::String, string::ToString};
+    use alloc::{format, string::String, string::ToString, vec};
 
     #[test]
     fn append_matches_fresh_build_and_returns_index() {
@@ -593,5 +627,57 @@ mod tests {
         let tree: MerkleTree = core::iter::empty::<&[u8]>().collect();
         assert!(tree.is_empty());
         assert!(tree.root().is_none());
+    }
+
+    #[test]
+    fn prove_many_preserves_order_and_duplicates() {
+        let tree = MerkleTree::from_leaves(["a", "b", "c", "d"]);
+        let root = tree.root().expect("root");
+        let multi = tree.prove_many([2, 0, 2]).expect("in range");
+        assert_eq!(multi.indices(), vec![2, 0, 2]);
+        assert_eq!(multi.len(), 3);
+        assert!(multi.verify(root));
+        assert_eq!(multi.proofs[0].proof.leaf_hash, hash_leaf(b"c"));
+        assert_eq!(multi.proofs[1].proof.leaf_hash, hash_leaf(b"a"));
+        assert_eq!(multi.proofs[0], multi.proofs[2]);
+        assert!(tree.prove_many([0, 99]).is_none());
+        assert!(tree.prove_many([4]).is_none());
+    }
+
+    #[test]
+    fn prove_many_empty_request_and_empty_tree() {
+        let empty = MerkleTree::from_leaves(core::iter::empty::<&[u8]>());
+        let none = empty
+            .prove_many(core::iter::empty::<usize>())
+            .expect("empty");
+        assert!(none.is_empty());
+        assert!(empty.prove_many([0]).is_none());
+        assert!(empty.prove_all().is_empty());
+
+        let tree = MerkleTree::from_leaves(["a", "b", "c"]);
+        let root = tree.root().expect("root");
+        let none = tree
+            .prove_many(core::iter::empty::<usize>())
+            .expect("empty");
+        assert!(none.is_empty());
+        assert!(none.verify(root));
+
+        let all = tree.prove_all();
+        assert_eq!(all.indices(), vec![0, 1, 2]);
+        assert!(all.verify(root));
+        for (i, item) in all.proofs.iter().enumerate() {
+            assert_eq!(item.index, i);
+            assert_eq!(item.proof, tree.prove(i).unwrap());
+        }
+    }
+
+    #[test]
+    fn prove_many_odd_leaf_count_matches_single_proofs() {
+        let tree = MerkleTree::from_leaves(["a", "b", "c"]);
+        let root = tree.root().expect("root");
+        let multi = tree.prove_many([0, 2]).expect("in range");
+        assert!(multi.verify(root));
+        assert_eq!(multi.proofs[0].proof, tree.prove(0).unwrap());
+        assert_eq!(multi.proofs[1].proof, tree.prove(2).unwrap());
     }
 }

@@ -3,6 +3,12 @@
 //! A proof is the leaf hash plus the ordered sibling hashes from that leaf up
 //! to (but not including) the root. Each step records whether the sibling sits
 //! on the left or the right so the verifier can rebuild the same parent hashes.
+//!
+//! [`MultiProof`] is a naive bundle of those single-leaf paths. It does not
+//! share overlapping siblings; a later format can compress that.
+//!
+//! [`MultiProof`] is a naive bundle of those single-leaf paths. It does not
+//! share overlapping siblings; a later format can compress that.
 
 #[cfg(not(feature = "std"))]
 use alloc::{string::String, vec::Vec};
@@ -178,6 +184,61 @@ impl IndexedInclusionProof {
     }
 }
 
+/// Naive multi-leaf inclusion proof: one independent path per requested leaf.
+///
+/// Sibling hashes are not shared across leaves. Verification is exactly
+/// "every contained [`IndexedInclusionProof`] verifies against the same root".
+/// Overlapping paths can be compressed later without changing this type's
+/// meaning.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct MultiProof {
+    /// Per-leaf proofs, in the order the caller requested them.
+    pub proofs: Vec<IndexedInclusionProof>,
+}
+
+impl MultiProof {
+    /// Number of single-leaf proofs in this bundle.
+    pub fn len(&self) -> usize {
+        self.proofs.len()
+    }
+
+    /// `true` when no leaves were requested.
+    pub fn is_empty(&self) -> bool {
+        self.proofs.is_empty()
+    }
+
+    /// Leaf indices covered by this bundle, in caller order.
+    pub fn indices(&self) -> Vec<usize> {
+        self.proofs.iter().map(|item| item.index).collect()
+    }
+
+    /// Verify every contained proof against the same expected root.
+    ///
+    /// An empty bundle is treated as vacuously true for any root.
+    pub fn verify(&self, expected_root: [u8; 32]) -> bool {
+        self.proofs.iter().all(|item| item.verify(expected_root))
+    }
+}
+
+impl core::fmt::Display for MultiProof {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "count={}, proofs=[", self.proofs.len())?;
+        for (i, item) in self.proofs.iter().enumerate() {
+            if i > 0 {
+                write!(f, "; ")?;
+            }
+            write!(f, "index={}, {}", item.index, item.proof)?;
+        }
+        write!(f, "]")
+    }
+}
+
+/// Verify a naive multiproof against an expected root.
+pub fn verify_multiproof(proof: &MultiProof, expected_root: [u8; 32]) -> bool {
+    proof.verify(expected_root)
+}
+
 /// Verify an inclusion proof using the original leaf data and expected root.
 pub fn verify_inclusion(leaf_data: &[u8], steps: &[ProofStep], expected_root: [u8; 32]) -> bool {
     let proof = InclusionProof {
@@ -279,5 +340,56 @@ mod tests {
         assert!(msg.contains('X'));
         let with_space = parse_proof_steps(&format!(" {} ", two_leaf_proof().0.steps_spec()));
         assert!(with_space.is_ok());
+    }
+
+    #[test]
+    fn empty_multiproof_is_vacuous_and_displays() {
+        let proof = MultiProof::default();
+        assert!(proof.is_empty());
+        assert_eq!(proof.len(), 0);
+        assert!(proof.indices().is_empty());
+        assert!(proof.verify([0u8; 32]));
+        assert!(verify_multiproof(&proof, [0xff; 32]));
+        assert_eq!(proof.to_string(), "count=0, proofs=[]");
+    }
+
+    #[test]
+    fn handmade_multiproof_verifies_each_leaf() {
+        let left = hash_leaf(b"a");
+        let right = hash_leaf(b"b");
+        let root = hash_nodes(&left, &right);
+        let proof = MultiProof {
+            proofs: vec![
+                IndexedInclusionProof {
+                    index: 0,
+                    proof: InclusionProof {
+                        leaf_hash: left,
+                        steps: vec![ProofStep {
+                            sibling: right,
+                            side: SiblingSide::Right,
+                        }],
+                    },
+                },
+                IndexedInclusionProof {
+                    index: 1,
+                    proof: InclusionProof {
+                        leaf_hash: right,
+                        steps: vec![ProofStep {
+                            sibling: left,
+                            side: SiblingSide::Left,
+                        }],
+                    },
+                },
+            ],
+        };
+        assert_eq!(proof.len(), 2);
+        assert_eq!(proof.indices(), vec![0, 1]);
+        assert!(proof.verify(root));
+        assert!(verify_multiproof(&proof, root));
+        assert!(!proof.verify(hash_leaf(b"nope")));
+        let shown = proof.to_string();
+        assert!(shown.contains("count=2"));
+        assert!(shown.contains("index=0"));
+        assert!(shown.contains("index=1"));
     }
 }

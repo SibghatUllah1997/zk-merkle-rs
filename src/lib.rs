@@ -21,6 +21,10 @@
 //!
 //! // Or verify using the free function with raw leaf data:
 //! assert!(verify_inclusion(b"c", &proof.steps, root));
+//!
+//! // Naive multiproof: independent paths, no sibling sharing
+//! let multi = tree.prove_many([0, 2]).expect("in range");
+//! assert!(multi.verify(root));
 //! ```
 //!
 //! Design choices:
@@ -33,7 +37,7 @@
 //! Layout:
 //! - [`hashing`] — domain-separated SHA-256 and hex helpers
 //! - [`error`] — length, hex, and proof-step errors
-//! - [`proof`] — inclusion proofs and verification
+//! - [`proof`] — inclusion proofs, naive multiproofs, and verification
 //! - [`tree`] — [`MerkleTree`], [`MerkleRoot`], and leaf metadata
 
 #![cfg_attr(not(feature = "std"), no_std)]
@@ -52,7 +56,7 @@ pub mod cli;
 pub mod error;
 /// Domain-separated SHA-256 hashing and hex helpers for 32-byte digests.
 pub mod hashing;
-/// Inclusion proofs and compact L/R step encoding.
+/// Inclusion proofs, compact L/R step encoding, and naive multiproofs.
 pub mod proof;
 /// Merkle tree construction, typed roots, and leaf metadata.
 pub mod tree;
@@ -62,7 +66,7 @@ pub use hashing::{
     from_hex, hash_leaf, hash_nodes, to_hex, to_hex32, try_from_hex32, LEAF_PREFIX, NODE_PREFIX,
 };
 pub use proof::{
-    parse_proof_steps, verify_inclusion, InclusionProof, IndexedInclusionProof, ProofStep,
-    SiblingSide,
+    parse_proof_steps, verify_inclusion, verify_multiproof, InclusionProof, IndexedInclusionProof,
+    MultiProof, ProofStep, SiblingSide,
 };
 pub use tree::{LeafInfo, MerkleRoot, MerkleTree};
