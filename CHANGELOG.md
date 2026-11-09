@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-09
+
+- Add a naive multiproof API that bundles per-leaf inclusion paths without sharing siblings
+- Callers can prove several indices at once and check the original leaf bytes against that bundle
+- Poseidon and Rescue hash hooks sit behind feature flags and return a clear not-implemented error until a real binding lands
+
 ## 2026-11-05 (append)
 
 - Add `MerkleTree::append`, `append_hashed`, and `extend_hashed` for growing a tree in place

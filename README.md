@@ -17,8 +17,10 @@ Fast, tiny, no_std-friendly SHA-256 Merkle tree with inclusion proofs and a clea
 ### Features
 - Proofs: generate and verify inclusion proofs
 - Indexed proofs: carry original leaf index alongside the proof
+- Multiproofs: naive bundle of independent per-leaf paths (no sibling sharing yet)
 - serde support: optional `serde` derive on proof/root types
 - no_std: works without `std` (uses `alloc`) via feature flags
+- Hash placeholders: `poseidon` and `rescue` features expose stubs that return `HashNotImplemented`
 - Clear domain separation:
   - Leaf hash: H(0x00 || data)
   - Internal node hash: H(0x01 || left || right)
@@ -64,6 +66,10 @@ assert!(proof.verify(root));
 
 // Or verify using the free function with raw leaf data:
 assert!(verify_inclusion(b"c", &proof.steps, root));
+
+// Naive multiproof: independent paths, no sibling sharing
+let multi = tree.prove_many([0, 2]).expect("in range");
+assert!(multi.verify(root));
 ```
 
 ### Benchmarks (micro, one-shot)
@@ -94,6 +100,7 @@ graph TD
 - Property tests: `cargo test --test proptest_hashing --test proptest_tree`
 - Fuzzing (nightly): see `fuzz/README.md` (`cargo +nightly fuzz run tree_prove`)
 - no_std surface: `cargo test --no-default-features` and `cargo test --no-default-features --features serde`
+- Hash stubs: `cargo test --features poseidon,rescue` (functions return `HashNotImplemented`)
 - Format and lints: `cargo fmt --all --check` and `cargo clippy --all-targets --all-features -D warnings`
 - Docs: `cargo doc --no-deps`
 

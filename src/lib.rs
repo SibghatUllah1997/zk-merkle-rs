@@ -33,10 +33,13 @@
 //! - Odd layers are padded by duplicating the last element (except a single-leaf
 //!   tree, whose root is exactly the leaf hash)
 //! - Hash function: sha2::Sha256 (audited crate; no hand-rolled crypto)
+//! - Multiproofs are a list of independent paths; overlapping siblings are not
+//!   shared yet
+//! - Poseidon and Rescue names exist behind feature flags but do not hash yet
 //!
 //! Layout:
-//! - [`hashing`] — domain-separated SHA-256 and hex helpers
-//! - [`error`] — length, hex, and proof-step errors
+//! - [`hashing`] — domain-separated SHA-256, hex helpers, and hash placeholders
+//! - [`error`] — length, hex, proof-step, and placeholder-hash errors
 //! - [`proof`] — inclusion proofs, naive multiproofs, and verification
 //! - [`tree`] — [`MerkleTree`], [`MerkleRoot`], and leaf metadata
 
@@ -54,7 +57,7 @@ pub mod cli;
 
 /// Recoverable conversion and parse errors.
 pub mod error;
-/// Domain-separated SHA-256 hashing and hex helpers for 32-byte digests.
+/// Domain-separated SHA-256 hashing, hex helpers, and hash placeholders.
 pub mod hashing;
 /// Inclusion proofs, compact L/R step encoding, and naive multiproofs.
 pub mod proof;

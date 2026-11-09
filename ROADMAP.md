@@ -18,8 +18,8 @@ This project will evolve from a simple educational Merkle tree to a more feature
 14. Add `Arbitrary`/quickcheck-style property tests [x]
 15. Fuzz basic operations (cargo-fuzz) [x]
 16. Add incremental append (rebuild-on-append) API [x]
-17. Provide multiproof skeleton (no optimization)
-18. Add Poseidon/Rescue skeletons behind feature flags (no impl yet)
+17. Provide multiproof skeleton (no optimization) [x]
+18. Add Poseidon/Rescue skeletons behind feature flags (no impl yet) [x]
 19. Integrate blake3 as an alternative hash (feature flag)
 20. Add `no_std` CI job
 21. Add documentation site (mdbook) scaffold

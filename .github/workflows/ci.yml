@@ -31,7 +31,7 @@ jobs:
       - name: Docs
         env:
           RUSTDOCFLAGS: "-D warnings"
-        run: cargo doc --no-deps
+        run: cargo doc --no-deps --all-features
 
   features:
     name: features (${{ matrix.name }})
@@ -48,6 +48,8 @@ jobs:
             flags: --no-default-features --features std
           - name: std+serde
             flags: --all-features
+          - name: no_std+poseidon+rescue
+            flags: --no-default-features --features poseidon,rescue
     steps:
       - name: Checkout
         uses: actions/checkout@v4
