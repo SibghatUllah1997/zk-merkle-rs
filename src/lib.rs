@@ -57,7 +57,7 @@ pub mod cli;
 
 /// Recoverable conversion and parse errors.
 pub mod error;
-/// Domain-separated SHA-256 hashing, hex helpers, and hash placeholders.
+/// Domain-separated SHA-256/BLAKE3 hashing, hex helpers, and hash placeholders.
 pub mod hashing;
 /// Inclusion proofs, compact L/R step encoding, and naive multiproofs.
 pub mod proof;
@@ -65,6 +65,8 @@ pub mod proof;
 pub mod tree;
 
 pub use error::{try_array32, HashNotImplemented, HexError, LengthError, ParseStepsError};
+#[cfg(feature = "blake3")]
+pub use hashing::{blake3_hash_leaf, blake3_hash_nodes};
 pub use hashing::{
     from_hex, hash_leaf, hash_leaf_with, hash_nodes, hash_nodes_with, to_hex, to_hex32,
     try_from_hex32, HashAlgorithm, LEAF_PREFIX, NODE_PREFIX,

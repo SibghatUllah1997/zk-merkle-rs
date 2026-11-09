@@ -10,8 +10,9 @@
 //! can be printed and parsed without pulling in a second public type.
 //!
 //! Alternative hashes can be selected through [`HashAlgorithm`]. SHA-256 is
-//! implemented; Poseidon and Rescue are feature-gated placeholders that
-//! return [`crate::error::HashNotImplemented`].
+//! always implemented. BLAKE3 is implemented behind the `blake3` feature and
+//! uses the same `0x00`/`0x01` prefixes. Poseidon and Rescue are feature-gated
+//! placeholders that return [`crate::error::HashNotImplemented`].
 
 #[cfg(not(feature = "std"))]
 use alloc::{string::String, vec::Vec};
@@ -48,6 +49,9 @@ pub const RESCUE_NODE_PREFIX: u8 = 0x21;
 pub enum HashAlgorithm {
     /// Domain-separated SHA-256 used by [`hash_leaf`] and [`hash_nodes`].
     Sha256,
+    /// Domain-separated BLAKE3 (`blake3` feature), see [`blake3_hash_leaf`].
+    #[cfg(feature = "blake3")]
+    Blake3,
     /// Poseidon placeholder; enable the `poseidon` feature to name it.
     #[cfg(feature = "poseidon")]
     Poseidon,
@@ -61,6 +65,8 @@ impl HashAlgorithm {
     pub const fn name(self) -> &'static str {
         match self {
             Self::Sha256 => "sha256",
+            #[cfg(feature = "blake3")]
+            Self::Blake3 => "blake3",
             #[cfg(feature = "poseidon")]
             Self::Poseidon => "poseidon",
             #[cfg(feature = "rescue")]
@@ -99,6 +105,8 @@ pub fn hash_leaf_with(
 ) -> Result<[u8; 32], HashNotImplemented> {
     match algorithm {
         HashAlgorithm::Sha256 => Ok(hash_leaf(data)),
+        #[cfg(feature = "blake3")]
+        HashAlgorithm::Blake3 => Ok(blake3_hash_leaf(data)),
         #[cfg(feature = "poseidon")]
         HashAlgorithm::Poseidon => poseidon_hash_leaf(data),
         #[cfg(feature = "rescue")]
@@ -114,11 +122,36 @@ pub fn hash_nodes_with(
 ) -> Result<[u8; 32], HashNotImplemented> {
     match algorithm {
         HashAlgorithm::Sha256 => Ok(hash_nodes(left, right)),
+        #[cfg(feature = "blake3")]
+        HashAlgorithm::Blake3 => Ok(blake3_hash_nodes(left, right)),
         #[cfg(feature = "poseidon")]
         HashAlgorithm::Poseidon => poseidon_hash_nodes(left, right),
         #[cfg(feature = "rescue")]
         HashAlgorithm::Rescue => rescue_hash_nodes(left, right),
     }
+}
+
+/// Compute a BLAKE3 leaf hash as `BLAKE3(0x00 || data)`.
+///
+/// Uses the audited `blake3` crate in its default 32-byte output mode. The
+/// prefixes match SHA-256 because the digest function itself already keeps
+/// SHA-256 and BLAKE3 trees apart; the prefix only separates leaves from nodes.
+#[cfg(feature = "blake3")]
+pub fn blake3_hash_leaf(data: &[u8]) -> [u8; 32] {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(&[LEAF_PREFIX]);
+    hasher.update(data);
+    hasher.finalize().into()
+}
+
+/// Compute a BLAKE3 parent hash as `BLAKE3(0x01 || left || right)`.
+#[cfg(feature = "blake3")]
+pub fn blake3_hash_nodes(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(&[NODE_PREFIX]);
+    hasher.update(left);
+    hasher.update(right);
+    hasher.finalize().into()
 }
 
 /// Poseidon leaf hash placeholder. Always returns [`HashNotImplemented`].
@@ -226,6 +259,8 @@ pub fn to_hex32(bytes: &[u8; 32]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(all(feature = "blake3", not(feature = "std")))]
+    use alloc::vec;
     #[cfg(not(feature = "std"))]
     use alloc::{format, string::ToString, vec::Vec};
 
@@ -283,6 +318,51 @@ mod tests {
         );
         assert_eq!(HashAlgorithm::Sha256.name(), "sha256");
         assert_eq!(HashAlgorithm::Sha256.to_string(), "sha256");
+    }
+
+    #[cfg(feature = "blake3")]
+    #[test]
+    fn blake3_hashes_match_prefixed_one_shot_and_differ_from_sha256() {
+        let mut leaf_input = vec![LEAF_PREFIX];
+        leaf_input.extend_from_slice(b"abc");
+        let expected_leaf: [u8; 32] = blake3::hash(&leaf_input).into();
+        assert_eq!(blake3_hash_leaf(b"abc"), expected_leaf);
+        assert_ne!(blake3_hash_leaf(b"abc"), hash_leaf(b"abc"));
+
+        let left = blake3_hash_leaf(b"a");
+        let right = blake3_hash_leaf(b"b");
+        let mut node_input = vec![NODE_PREFIX];
+        node_input.extend_from_slice(&left);
+        node_input.extend_from_slice(&right);
+        let expected_node: [u8; 32] = blake3::hash(&node_input).into();
+        assert_eq!(blake3_hash_nodes(&left, &right), expected_node);
+        assert_ne!(
+            blake3_hash_nodes(&left, &right),
+            blake3_hash_nodes(&right, &left)
+        );
+        // Leaf and node domains stay apart on the same 64-byte payload.
+        let payload = [0x22u8; 64];
+        let mut as_node = vec![NODE_PREFIX];
+        as_node.extend_from_slice(&payload);
+        let as_node: [u8; 32] = blake3::hash(&as_node).into();
+        assert_ne!(blake3_hash_leaf(&payload), as_node);
+    }
+
+    #[cfg(feature = "blake3")]
+    #[test]
+    fn hash_with_blake3_dispatches_to_blake3() {
+        assert_eq!(
+            hash_leaf_with(HashAlgorithm::Blake3, b"abc").expect("blake3"),
+            blake3_hash_leaf(b"abc")
+        );
+        let left = blake3_hash_leaf(b"a");
+        let right = blake3_hash_leaf(b"b");
+        assert_eq!(
+            hash_nodes_with(HashAlgorithm::Blake3, &left, &right).expect("blake3"),
+            blake3_hash_nodes(&left, &right)
+        );
+        assert_eq!(HashAlgorithm::Blake3.name(), "blake3");
+        assert_eq!(HashAlgorithm::Blake3.to_string(), "blake3");
     }
 
     #[cfg(feature = "poseidon")]
