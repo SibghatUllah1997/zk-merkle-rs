@@ -70,6 +70,8 @@ pub use hashing::{
 pub use hashing::{
     poseidon_hash_leaf, poseidon_hash_nodes, POSEIDON_LEAF_PREFIX, POSEIDON_NODE_PREFIX,
 };
+#[cfg(feature = "rescue")]
+pub use hashing::{rescue_hash_leaf, rescue_hash_nodes, RESCUE_LEAF_PREFIX, RESCUE_NODE_PREFIX};
 pub use proof::{
     parse_proof_steps, verify_inclusion, verify_inclusion_many, verify_multiproof, InclusionProof,
     IndexedInclusionProof, MultiProof, ProofStep, SiblingSide,

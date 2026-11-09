@@ -40,3 +40,5 @@ std = []
 serde = ["dep:serde"]
 ## Placeholder Poseidon hash API. Functions return HashNotImplemented.
 poseidon = []
+## Placeholder Rescue hash API. Functions return HashNotImplemented.
+rescue = []

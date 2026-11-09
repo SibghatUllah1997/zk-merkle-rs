@@ -232,5 +232,8 @@ mod tests {
         assert_eq!(err.algorithm, "poseidon");
         assert_eq!(err.to_string(), "poseidon hashing is not implemented yet");
         assert_eq!(HashNotImplemented::new("poseidon"), err);
+        let rescue = HashNotImplemented::new("rescue");
+        assert_eq!(rescue.to_string(), "rescue hashing is not implemented yet");
+        assert_ne!(rescue, err);
     }
 }

@@ -10,8 +10,8 @@
 //! can be printed and parsed without pulling in a second public type.
 //!
 //! Alternative hashes can be selected through [`HashAlgorithm`]. SHA-256 is
-//! implemented; Poseidon is a feature-gated placeholder that returns
-//! [`crate::error::HashNotImplemented`].
+//! implemented; Poseidon and Rescue are feature-gated placeholders that
+//! return [`crate::error::HashNotImplemented`].
 
 #[cfg(not(feature = "std"))]
 use alloc::{string::String, vec::Vec};
@@ -34,6 +34,14 @@ pub const POSEIDON_LEAF_PREFIX: u8 = 0x10;
 #[cfg(feature = "poseidon")]
 pub const POSEIDON_NODE_PREFIX: u8 = 0x11;
 
+/// Reserved leaf prefix for a future Rescue binding (not hashed yet).
+#[cfg(feature = "rescue")]
+pub const RESCUE_LEAF_PREFIX: u8 = 0x20;
+
+/// Reserved parent-node prefix for a future Rescue binding.
+#[cfg(feature = "rescue")]
+pub const RESCUE_NODE_PREFIX: u8 = 0x21;
+
 /// Which digest a caller asked for. SHA-256 is always available.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -43,6 +51,9 @@ pub enum HashAlgorithm {
     /// Poseidon placeholder; enable the `poseidon` feature to name it.
     #[cfg(feature = "poseidon")]
     Poseidon,
+    /// Rescue placeholder; enable the `rescue` feature to name it.
+    #[cfg(feature = "rescue")]
+    Rescue,
 }
 
 impl HashAlgorithm {
@@ -52,6 +63,8 @@ impl HashAlgorithm {
             Self::Sha256 => "sha256",
             #[cfg(feature = "poseidon")]
             Self::Poseidon => "poseidon",
+            #[cfg(feature = "rescue")]
+            Self::Rescue => "rescue",
         }
     }
 }
@@ -88,6 +101,8 @@ pub fn hash_leaf_with(
         HashAlgorithm::Sha256 => Ok(hash_leaf(data)),
         #[cfg(feature = "poseidon")]
         HashAlgorithm::Poseidon => poseidon_hash_leaf(data),
+        #[cfg(feature = "rescue")]
+        HashAlgorithm::Rescue => rescue_hash_leaf(data),
     }
 }
 
@@ -101,6 +116,8 @@ pub fn hash_nodes_with(
         HashAlgorithm::Sha256 => Ok(hash_nodes(left, right)),
         #[cfg(feature = "poseidon")]
         HashAlgorithm::Poseidon => poseidon_hash_nodes(left, right),
+        #[cfg(feature = "rescue")]
+        HashAlgorithm::Rescue => rescue_hash_nodes(left, right),
     }
 }
 
@@ -120,6 +137,24 @@ pub fn poseidon_hash_nodes(
     _right: &[u8; 32],
 ) -> Result<[u8; 32], HashNotImplemented> {
     Err(HashNotImplemented::new(HashAlgorithm::Poseidon.name()))
+}
+
+/// Rescue leaf hash placeholder. Always returns [`HashNotImplemented`].
+///
+/// A later binding will absorb `data` as field elements and use
+/// [`RESCUE_LEAF_PREFIX`] so leaves stay distinct from parent nodes.
+#[cfg(feature = "rescue")]
+pub fn rescue_hash_leaf(_data: &[u8]) -> Result<[u8; 32], HashNotImplemented> {
+    Err(HashNotImplemented::new(HashAlgorithm::Rescue.name()))
+}
+
+/// Rescue parent-node hash placeholder. Always returns [`HashNotImplemented`].
+#[cfg(feature = "rescue")]
+pub fn rescue_hash_nodes(
+    _left: &[u8; 32],
+    _right: &[u8; 32],
+) -> Result<[u8; 32], HashNotImplemented> {
+    Err(HashNotImplemented::new(HashAlgorithm::Rescue.name()))
 }
 
 fn hex_nibble(byte: u8, index: usize) -> Result<u8, HexError> {
@@ -218,6 +253,19 @@ mod tests {
             assert_ne!(POSEIDON_LEAF_PREFIX, LEAF_PREFIX);
             assert_ne!(POSEIDON_NODE_PREFIX, NODE_PREFIX);
         }
+        #[cfg(feature = "rescue")]
+        {
+            assert_eq!(RESCUE_LEAF_PREFIX, 0x20);
+            assert_eq!(RESCUE_NODE_PREFIX, 0x21);
+            assert_ne!(RESCUE_LEAF_PREFIX, RESCUE_NODE_PREFIX);
+            assert_ne!(RESCUE_LEAF_PREFIX, LEAF_PREFIX);
+            assert_ne!(RESCUE_NODE_PREFIX, NODE_PREFIX);
+            #[cfg(feature = "poseidon")]
+            {
+                assert_ne!(RESCUE_LEAF_PREFIX, POSEIDON_LEAF_PREFIX);
+                assert_ne!(RESCUE_NODE_PREFIX, POSEIDON_NODE_PREFIX);
+            }
+        }
     }
 
     #[test]
@@ -257,6 +305,29 @@ mod tests {
         );
         assert_eq!(HashAlgorithm::Poseidon.name(), "poseidon");
         assert_eq!(HashAlgorithm::Poseidon.to_string(), "poseidon");
+    }
+
+    #[cfg(feature = "rescue")]
+    #[test]
+    fn rescue_stubs_return_not_implemented() {
+        let err = rescue_hash_leaf(b"abc").expect_err("stub");
+        assert_eq!(err.algorithm, "rescue");
+        assert_eq!(err.to_string(), "rescue hashing is not implemented yet");
+        assert_eq!(
+            rescue_hash_nodes(&[1u8; 32], &[2u8; 32]).expect_err("stub"),
+            err
+        );
+        assert_eq!(
+            hash_leaf_with(HashAlgorithm::Rescue, b"abc").expect_err("stub"),
+            err
+        );
+        assert_eq!(
+            hash_nodes_with(HashAlgorithm::Rescue, &[1u8; 32], &[2u8; 32]).expect_err("stub"),
+            err
+        );
+        assert_eq!(HashAlgorithm::Rescue.name(), "rescue");
+        assert_eq!(HashAlgorithm::Rescue.to_string(), "rescue");
+        assert_ne!(err, HashNotImplemented::new("poseidon"));
     }
 
     #[test]
