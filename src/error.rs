@@ -1,4 +1,5 @@
-//! Recoverable errors for length checks, hex decoding, and proof-step parsing.
+//! Recoverable errors for length checks, hex decoding, proof-step parsing,
+//! and placeholder hash algorithms.
 //!
 //! These types are `no_std` friendly. When the `std` feature is on they also
 //! implement [`std::error::Error`] so they plug into ordinary `?` chains.
@@ -121,6 +122,29 @@ impl std::error::Error for ParseStepsError {
     }
 }
 
+/// Returned when a named hash is selected but has no implementation yet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HashNotImplemented {
+    /// Stable algorithm name, e.g. `"poseidon"` or `"rescue"`.
+    pub algorithm: &'static str,
+}
+
+impl HashNotImplemented {
+    /// Build an error for the given algorithm name.
+    pub const fn new(algorithm: &'static str) -> Self {
+        Self { algorithm }
+    }
+}
+
+impl core::fmt::Display for HashNotImplemented {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{} hashing is not implemented yet", self.algorithm)
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for HashNotImplemented {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -199,5 +223,14 @@ mod tests {
         let wrapped = ParseStepsError::Hex(hex);
         assert!(wrapped.source().is_some());
         assert!(ParseStepsError::EmptyToken.source().is_none());
+        assert!(HashNotImplemented::new("poseidon").source().is_none());
+    }
+
+    #[test]
+    fn hash_not_implemented_displays_algorithm_name() {
+        let err = HashNotImplemented::new("poseidon");
+        assert_eq!(err.algorithm, "poseidon");
+        assert_eq!(err.to_string(), "poseidon hashing is not implemented yet");
+        assert_eq!(HashNotImplemented::new("poseidon"), err);
     }
 }

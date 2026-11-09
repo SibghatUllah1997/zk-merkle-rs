@@ -8,19 +8,59 @@
 //! The prefixes stop a leaf hash from colliding with a two-child node hash of
 //! the same 32-byte payload. Hex helpers live here so roots and proof hashes
 //! can be printed and parsed without pulling in a second public type.
+//!
+//! Alternative hashes can be selected through [`HashAlgorithm`]. SHA-256 is
+//! implemented; Poseidon is a feature-gated placeholder that returns
+//! [`crate::error::HashNotImplemented`].
 
 #[cfg(not(feature = "std"))]
 use alloc::{string::String, vec::Vec};
 
 use sha2::{Digest, Sha256};
 
-use crate::error::HexError;
+use crate::error::{HashNotImplemented, HexError};
 
 /// Domain-separation prefix prepended to raw leaf data before hashing.
 pub const LEAF_PREFIX: u8 = 0x00;
 
 /// Domain-separation prefix prepended to concatenated child hashes.
 pub const NODE_PREFIX: u8 = 0x01;
+
+/// Reserved leaf prefix for a future Poseidon binding (not hashed yet).
+#[cfg(feature = "poseidon")]
+pub const POSEIDON_LEAF_PREFIX: u8 = 0x10;
+
+/// Reserved parent-node prefix for a future Poseidon binding.
+#[cfg(feature = "poseidon")]
+pub const POSEIDON_NODE_PREFIX: u8 = 0x11;
+
+/// Which digest a caller asked for. SHA-256 is always available.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum HashAlgorithm {
+    /// Domain-separated SHA-256 used by [`hash_leaf`] and [`hash_nodes`].
+    Sha256,
+    /// Poseidon placeholder; enable the `poseidon` feature to name it.
+    #[cfg(feature = "poseidon")]
+    Poseidon,
+}
+
+impl HashAlgorithm {
+    /// Stable lowercase name for errors and logs.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Sha256 => "sha256",
+            #[cfg(feature = "poseidon")]
+            Self::Poseidon => "poseidon",
+        }
+    }
+}
+
+impl core::fmt::Display for HashAlgorithm {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(self.name())
+    }
+}
 
 /// Compute a leaf hash as `SHA-256(0x00 || data)`.
 pub fn hash_leaf(data: &[u8]) -> [u8; 32] {
@@ -37,6 +77,49 @@ pub fn hash_nodes(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
     hasher.update(left);
     hasher.update(right);
     hasher.finalize().into()
+}
+
+/// Hash a leaf with `algorithm`. SHA-256 always succeeds.
+pub fn hash_leaf_with(
+    algorithm: HashAlgorithm,
+    data: &[u8],
+) -> Result<[u8; 32], HashNotImplemented> {
+    match algorithm {
+        HashAlgorithm::Sha256 => Ok(hash_leaf(data)),
+        #[cfg(feature = "poseidon")]
+        HashAlgorithm::Poseidon => poseidon_hash_leaf(data),
+    }
+}
+
+/// Hash two child nodes with `algorithm`. SHA-256 always succeeds.
+pub fn hash_nodes_with(
+    algorithm: HashAlgorithm,
+    left: &[u8; 32],
+    right: &[u8; 32],
+) -> Result<[u8; 32], HashNotImplemented> {
+    match algorithm {
+        HashAlgorithm::Sha256 => Ok(hash_nodes(left, right)),
+        #[cfg(feature = "poseidon")]
+        HashAlgorithm::Poseidon => poseidon_hash_nodes(left, right),
+    }
+}
+
+/// Poseidon leaf hash placeholder. Always returns [`HashNotImplemented`].
+///
+/// A later binding will absorb `data` as field elements and use
+/// [`POSEIDON_LEAF_PREFIX`] so leaves stay distinct from parent nodes.
+#[cfg(feature = "poseidon")]
+pub fn poseidon_hash_leaf(_data: &[u8]) -> Result<[u8; 32], HashNotImplemented> {
+    Err(HashNotImplemented::new(HashAlgorithm::Poseidon.name()))
+}
+
+/// Poseidon parent-node hash placeholder. Always returns [`HashNotImplemented`].
+#[cfg(feature = "poseidon")]
+pub fn poseidon_hash_nodes(
+    _left: &[u8; 32],
+    _right: &[u8; 32],
+) -> Result<[u8; 32], HashNotImplemented> {
+    Err(HashNotImplemented::new(HashAlgorithm::Poseidon.name()))
 }
 
 fn hex_nibble(byte: u8, index: usize) -> Result<u8, HexError> {
@@ -109,7 +192,7 @@ pub fn to_hex32(bytes: &[u8; 32]) -> String {
 mod tests {
     use super::*;
     #[cfg(not(feature = "std"))]
-    use alloc::{format, vec::Vec};
+    use alloc::{format, string::ToString, vec::Vec};
 
     /// SHA-256(0x00 || "") — stable test vector for the empty leaf.
     const EMPTY_LEAF_HEX: &str = "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d";
@@ -127,6 +210,53 @@ mod tests {
         assert_eq!(LEAF_PREFIX, 0x00);
         assert_eq!(NODE_PREFIX, 0x01);
         assert_ne!(LEAF_PREFIX, NODE_PREFIX);
+        #[cfg(feature = "poseidon")]
+        {
+            assert_eq!(POSEIDON_LEAF_PREFIX, 0x10);
+            assert_eq!(POSEIDON_NODE_PREFIX, 0x11);
+            assert_ne!(POSEIDON_LEAF_PREFIX, POSEIDON_NODE_PREFIX);
+            assert_ne!(POSEIDON_LEAF_PREFIX, LEAF_PREFIX);
+            assert_ne!(POSEIDON_NODE_PREFIX, NODE_PREFIX);
+        }
+    }
+
+    #[test]
+    fn hash_leaf_with_sha256_matches_hash_leaf() {
+        let data = b"abc";
+        assert_eq!(
+            hash_leaf_with(HashAlgorithm::Sha256, data).expect("sha256"),
+            hash_leaf(data)
+        );
+        let left = hash_leaf(b"a");
+        let right = hash_leaf(b"b");
+        assert_eq!(
+            hash_nodes_with(HashAlgorithm::Sha256, &left, &right).expect("sha256"),
+            hash_nodes(&left, &right)
+        );
+        assert_eq!(HashAlgorithm::Sha256.name(), "sha256");
+        assert_eq!(HashAlgorithm::Sha256.to_string(), "sha256");
+    }
+
+    #[cfg(feature = "poseidon")]
+    #[test]
+    fn poseidon_stubs_return_not_implemented() {
+        let err = poseidon_hash_leaf(b"abc").expect_err("stub");
+        assert_eq!(err.algorithm, "poseidon");
+        assert_eq!(err.to_string(), "poseidon hashing is not implemented yet");
+        assert_eq!(
+            poseidon_hash_nodes(&[1u8; 32], &[2u8; 32]).expect_err("stub"),
+            err
+        );
+        assert_eq!(
+            hash_leaf_with(HashAlgorithm::Poseidon, b"abc").expect_err("stub"),
+            err
+        );
+        assert_eq!(
+            hash_nodes_with(HashAlgorithm::Poseidon, &[1u8; 32], &[2u8; 32]).expect_err("stub"),
+            err
+        );
+        assert_eq!(HashAlgorithm::Poseidon.name(), "poseidon");
+        assert_eq!(HashAlgorithm::Poseidon.to_string(), "poseidon");
     }
 
     #[test]

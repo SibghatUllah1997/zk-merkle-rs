@@ -61,9 +61,14 @@ pub mod proof;
 /// Merkle tree construction, typed roots, and leaf metadata.
 pub mod tree;
 
-pub use error::{try_array32, HexError, LengthError, ParseStepsError};
+pub use error::{try_array32, HashNotImplemented, HexError, LengthError, ParseStepsError};
 pub use hashing::{
-    from_hex, hash_leaf, hash_nodes, to_hex, to_hex32, try_from_hex32, LEAF_PREFIX, NODE_PREFIX,
+    from_hex, hash_leaf, hash_leaf_with, hash_nodes, hash_nodes_with, to_hex, to_hex32,
+    try_from_hex32, HashAlgorithm, LEAF_PREFIX, NODE_PREFIX,
+};
+#[cfg(feature = "poseidon")]
+pub use hashing::{
+    poseidon_hash_leaf, poseidon_hash_nodes, POSEIDON_LEAF_PREFIX, POSEIDON_NODE_PREFIX,
 };
 pub use proof::{
     parse_proof_steps, verify_inclusion, verify_inclusion_many, verify_multiproof, InclusionProof,

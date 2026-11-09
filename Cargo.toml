@@ -38,3 +38,5 @@ harness = false
 default = ["std"]
 std = []
 serde = ["dep:serde"]
+## Placeholder Poseidon hash API. Functions return HashNotImplemented.
+poseidon = []
