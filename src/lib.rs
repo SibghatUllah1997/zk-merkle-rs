@@ -66,7 +66,7 @@ pub use hashing::{
     from_hex, hash_leaf, hash_nodes, to_hex, to_hex32, try_from_hex32, LEAF_PREFIX, NODE_PREFIX,
 };
 pub use proof::{
-    parse_proof_steps, verify_inclusion, verify_multiproof, InclusionProof, IndexedInclusionProof,
-    MultiProof, ProofStep, SiblingSide,
+    parse_proof_steps, verify_inclusion, verify_inclusion_many, verify_multiproof, InclusionProof,
+    IndexedInclusionProof, MultiProof, ProofStep, SiblingSide,
 };
 pub use tree::{LeafInfo, MerkleRoot, MerkleTree};

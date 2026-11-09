@@ -1,6 +1,8 @@
 //! Property tests for tree construction, leaf metadata, and inclusion proofs.
 
-use merkle_tree::{hash_leaf, parse_proof_steps, verify_inclusion, MerkleRoot, MerkleTree};
+use merkle_tree::{
+    hash_leaf, parse_proof_steps, verify_inclusion, verify_inclusion_many, MerkleRoot, MerkleTree,
+};
 use proptest::prelude::*;
 use proptest::test_runner::FileFailurePersistence;
 
@@ -123,5 +125,33 @@ proptest! {
             .prop_map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
     ) {
         let _ = parse_proof_steps(&text);
+    }
+
+    #[test]
+    fn naive_multiproof_matches_single_paths(
+        leaves in nonempty_leaves(),
+        picks in prop::collection::vec(any::<u8>(), 1..=8)
+    ) {
+        let tree = MerkleTree::from_leaves(leaves.iter());
+        let root = tree.root().expect("non-empty");
+        let n = leaves.len();
+        let indices: Vec<usize> = picks.iter().map(|b| (*b as usize) % n).collect();
+        let multi = tree.prove_many(indices.iter().copied()).expect("in range");
+        prop_assert_eq!(multi.indices(), indices.clone());
+        prop_assert!(multi.verify(root));
+
+        let pairs: Vec<(usize, &[u8])> = indices
+            .iter()
+            .map(|&i| (i, leaves[i].as_slice()))
+            .collect();
+        prop_assert!(verify_inclusion_many(pairs, &multi, root));
+
+        for (slot, &i) in indices.iter().enumerate() {
+            prop_assert_eq!(&multi.proofs[slot].proof, &tree.prove(i).unwrap());
+        }
+
+        let all = tree.prove_all();
+        prop_assert_eq!(all.len(), n);
+        prop_assert!(all.verify(root));
     }
 }

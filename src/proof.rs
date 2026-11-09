@@ -239,6 +239,36 @@ pub fn verify_multiproof(proof: &MultiProof, expected_root: [u8; 32]) -> bool {
     proof.verify(expected_root)
 }
 
+/// Verify that each `(index, leaf_data)` pair matches the corresponding
+/// multiproof entry (same index and `hash_leaf`) and that the bundle
+/// verifies against `expected_root`.
+///
+/// The iterator must yield the same number of items as `proof`, in the same
+/// order. Extra, missing, or reordered items fail.
+pub fn verify_inclusion_many<'a, I>(leaves: I, proof: &MultiProof, expected_root: [u8; 32]) -> bool
+where
+    I: IntoIterator<Item = (usize, &'a [u8])>,
+{
+    let mut count = 0usize;
+    for (index, data) in leaves {
+        let entry = match proof.proofs.get(count) {
+            Some(entry) => entry,
+            None => return false,
+        };
+        if entry.index != index {
+            return false;
+        }
+        if entry.proof.leaf_hash != hash_leaf(data) {
+            return false;
+        }
+        count += 1;
+    }
+    if count != proof.proofs.len() {
+        return false;
+    }
+    proof.verify(expected_root)
+}
+
 /// Verify an inclusion proof using the original leaf data and expected root.
 pub fn verify_inclusion(leaf_data: &[u8], steps: &[ProofStep], expected_root: [u8; 32]) -> bool {
     let proof = InclusionProof {
@@ -391,5 +421,26 @@ mod tests {
         assert!(shown.contains("count=2"));
         assert!(shown.contains("index=0"));
         assert!(shown.contains("index=1"));
+
+        assert!(verify_inclusion_many(
+            [(0usize, b"a".as_ref()), (1, b"b".as_ref())],
+            &proof,
+            root
+        ));
+        assert!(!verify_inclusion_many(
+            [(0usize, b"a".as_ref())],
+            &proof,
+            root
+        ));
+        assert!(!verify_inclusion_many(
+            [(1usize, b"a".as_ref()), (1, b"b".as_ref())],
+            &proof,
+            root
+        ));
+        assert!(!verify_inclusion_many(
+            [(0usize, b"nope".as_ref()), (1, b"b".as_ref())],
+            &proof,
+            root
+        ));
     }
 }
