@@ -1,0 +1,21 @@
+[package]
+name = "merkle-tree-no-std-smoke"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Builds the merkle-tree crate on a bare-metal target to prove it never links std."
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+merkle-tree = { path = "../..", default-features = false }
+
+[features]
+default = []
+serde = ["merkle-tree/serde"]
+blake3 = ["merkle-tree/blake3"]
+
+# Keep this crate out of the root package so `cargo test` at the top level is unchanged.
+[workspace]
+members = ["."]
