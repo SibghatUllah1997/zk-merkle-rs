@@ -43,6 +43,7 @@
 //! - [`proof`] — inclusion proofs, naive multiproofs, and verification
 //! - [`tree`] — [`MerkleTree`], [`MerkleRoot`], and leaf metadata
 //! - [`chunk`] — split byte buffers into fixed-size leaves
+//! - [`log`] — append-only log with successive Merkle-root checkpoints
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
@@ -62,6 +63,8 @@ pub mod chunk;
 pub mod error;
 /// Domain-separated SHA-256/BLAKE3 hashing, hex helpers, and hash placeholders.
 pub mod hashing;
+/// Append-only log with successive Merkle-root checkpoints.
+pub mod log;
 /// Inclusion proofs, compact L/R step encoding, and naive multiproofs.
 pub mod proof;
 /// Merkle tree construction, typed roots, and leaf metadata.
@@ -83,6 +86,7 @@ pub use hashing::{
 };
 #[cfg(feature = "rescue")]
 pub use hashing::{rescue_hash_leaf, rescue_hash_nodes, RESCUE_LEAF_PREFIX, RESCUE_NODE_PREFIX};
+pub use log::{LogCheckpoint, MerkleLog};
 pub use proof::{
     parse_proof_steps, verify_inclusion, verify_inclusion_many, verify_inclusion_many_with,
     verify_inclusion_with, verify_multiproof, InclusionProof, IndexedInclusionProof, MultiProof,
