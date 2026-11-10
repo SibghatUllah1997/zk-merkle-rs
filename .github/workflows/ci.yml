@@ -67,3 +67,49 @@ jobs:
 
       - name: Tests
         run: cargo test ${{ matrix.flags }} -- --nocapture
+
+  no_std:
+    name: no_std (bare metal)
+    runs-on: ubuntu-latest
+    env:
+      TARGET: thumbv7em-none-eabihf
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: |
+          rustup update stable
+          rustup default stable
+          rustup component add clippy rustfmt
+          rustup target add "$TARGET"
+
+      # The target ships no std, so any std use in the crate or its deps fails here.
+      - name: Build library for bare metal
+        run: |
+          cargo build --lib --target "$TARGET" --no-default-features
+          cargo build --lib --target "$TARGET" --no-default-features --features serde
+          cargo build --lib --target "$TARGET" --no-default-features --features blake3
+          cargo build --lib --target "$TARGET" --no-default-features --features serde,blake3,poseidon,rescue
+
+      - name: Smoke crate format
+        working-directory: ci/no-std-smoke
+        run: cargo fmt -- --check
+
+      - name: Smoke crate clippy (bare metal)
+        working-directory: ci/no-std-smoke
+        run: |
+          cargo clippy --target "$TARGET" -- -D warnings
+          cargo clippy --target "$TARGET" --features serde,blake3 -- -D warnings
+
+      - name: Smoke crate build (bare metal)
+        working-directory: ci/no-std-smoke
+        run: |
+          cargo build --target "$TARGET"
+          cargo build --target "$TARGET" --features serde,blake3
+
+      - name: Smoke crate tests (host)
+        working-directory: ci/no-std-smoke
+        run: |
+          cargo test
+          cargo test --features serde,blake3
