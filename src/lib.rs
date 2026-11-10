@@ -42,6 +42,7 @@
 //! - [`error`] — length, hex, proof-step, and placeholder-hash errors
 //! - [`proof`] — inclusion proofs, naive multiproofs, and verification
 //! - [`tree`] — [`MerkleTree`], [`MerkleRoot`], and leaf metadata
+//! - [`chunk`] — split byte buffers into fixed-size leaves
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
@@ -55,6 +56,8 @@ extern crate alloc;
 #[cfg(feature = "std")]
 pub mod cli;
 
+/// Split byte buffers into fixed-size Merkle-tree leaves.
+pub mod chunk;
 /// Recoverable conversion and parse errors.
 pub mod error;
 /// Domain-separated SHA-256/BLAKE3 hashing, hex helpers, and hash placeholders.
@@ -64,6 +67,7 @@ pub mod proof;
 /// Merkle tree construction, typed roots, and leaf metadata.
 pub mod tree;
 
+pub use chunk::{chunk_bytes, chunk_bytes_owned, chunk_count, ChunkSizeError, Chunks};
 pub use error::{try_array32, HashNotImplemented, HexError, LengthError, ParseStepsError};
 #[cfg(feature = "blake3")]
 pub use hashing::{blake3_hash_leaf, blake3_hash_nodes};
