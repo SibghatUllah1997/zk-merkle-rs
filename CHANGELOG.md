@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-10
+
+- Split files and byte buffers into fixed-size Merkle leaves, including a streaming reader
+- Add an append-only log that snapshots a root after each append or batch
+- Examples show chunking a file and growing a log while old entries still prove
+
 ## 2026-11-09 (blake3)
 
 - Add an optional `blake3` feature with domain-separated BLAKE3 leaf and node hashing

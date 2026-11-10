@@ -22,6 +22,8 @@ Fast, tiny, no_std-friendly SHA-256 Merkle tree with inclusion proofs and a clea
 - no_std: works without `std` (uses `alloc`) via feature flags
 - BLAKE3: the `blake3` feature adds `BLAKE3(0x00 || data)` / `BLAKE3(0x01 || l || r)` trees via `MerkleTree::try_from_leaves_with(HashAlgorithm::Blake3, ..)` and `verify_with`
 - Hash placeholders: `poseidon` and `rescue` features expose stubs that return `HashNotImplemented`
+- Chunking: split buffers or `Read` streams into fixed-size leaves (`chunk_bytes`, `chunk_reader`)
+- Append-only log: `MerkleLog` records a root checkpoint after each append or batch
 - Clear domain separation:
   - Leaf hash: H(0x00 || data)
   - Internal node hash: H(0x01 || left || right)
@@ -50,6 +52,20 @@ cargo run --bin merkle -- verify --leaf c --root <root-hex> --steps <L|R:hex,...
 ```
 
 `build` prints a 64-character lowercase hex root. `prove` prints `root`, `index`, `leaf_hash`, and compact `steps` that `verify` consumes.
+
+### Examples
+Chunk a file (or a bundled sample) into leaves and prove the last chunk:
+
+```bash
+cargo run --example file_chunking
+cargo run --example file_chunking -- README.md
+```
+
+Grow an append-only log and print the root after each mutation:
+
+```bash
+cargo run --example append_only_log
+```
 
 ### Usage
 This example compiles and is also covered by doctests in the crate:

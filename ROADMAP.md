@@ -23,8 +23,8 @@ This project will evolve from a simple educational Merkle tree to a more feature
 19. Integrate blake3 as an alternative hash (feature flag) [x]
 20. Add `no_std` CI job
 21. Add documentation site (mdbook) scaffold
-22. Add example: file chunking into leaves
-23. Add example: simple append-only log with roots
+22. Add example: file chunking into leaves [x]
+23. Add example: simple append-only log with roots [x]
 24. Optimize memory layout for large trees
 25. Optimize proof generation by caching parent indices
 26. Add multiproof format and verifier
