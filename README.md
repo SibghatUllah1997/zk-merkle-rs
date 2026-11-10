@@ -117,6 +117,7 @@ graph TD
 - Property tests: `cargo test --test proptest_hashing --test proptest_tree`
 - Fuzzing (nightly): see `fuzz/README.md` (`cargo +nightly fuzz run tree_prove`)
 - no_std surface: `cargo test --no-default-features` and `cargo test --no-default-features --features serde`
+- Bare-metal no_std check: `rustup target add thumbv7em-none-eabihf`, then `cargo build --lib --target thumbv7em-none-eabihf --no-default-features`; the `ci/no-std-smoke` crate builds the same way and runs its checks on the host with `cargo test`
 - Hash stubs: `cargo test --features poseidon,rescue` (functions return `HashNotImplemented`)
 - BLAKE3: `cargo test --features blake3` and `cargo test --no-default-features --features blake3`
 - Format and lints: `cargo fmt --all --check` and `cargo clippy --all-targets --all-features -D warnings`
