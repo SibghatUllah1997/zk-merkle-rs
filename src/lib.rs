@@ -67,6 +67,8 @@ pub mod proof;
 /// Merkle tree construction, typed roots, and leaf metadata.
 pub mod tree;
 
+#[cfg(feature = "std")]
+pub use chunk::chunk_reader;
 pub use chunk::{chunk_bytes, chunk_bytes_owned, chunk_count, ChunkSizeError, Chunks};
 pub use error::{try_array32, HashNotImplemented, HexError, LengthError, ParseStepsError};
 #[cfg(feature = "blake3")]

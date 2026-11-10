@@ -92,6 +92,17 @@ pub fn chunk_count(len: usize, chunk_size: usize) -> Result<usize, ChunkSizeErro
 ///
 /// The last slice is shorter when `data.len()` is not a multiple of
 /// `chunk_size`. Empty input yields an empty vector.
+///
+/// ```
+/// use merkle_tree::{chunk_bytes, verify_inclusion, MerkleTree};
+///
+/// let data = b"abcdefghijkl";
+/// let chunks = chunk_bytes(data, 4).expect("size");
+/// let tree = MerkleTree::from_leaves(chunks.iter().copied());
+/// let root = tree.root().expect("root");
+/// let proof = tree.prove(1).expect("proof");
+/// assert!(verify_inclusion(b"efgh", &proof.steps, root));
+/// ```
 pub fn chunk_bytes(data: &[u8], chunk_size: usize) -> Result<Vec<&[u8]>, ChunkSizeError> {
     Ok(Chunks::new(data, chunk_size)?.collect())
 }
@@ -101,6 +112,47 @@ pub fn chunk_bytes_owned(data: &[u8], chunk_size: usize) -> Result<Vec<Vec<u8>>,
     Ok(Chunks::new(data, chunk_size)?
         .map(|chunk| chunk.to_vec())
         .collect())
+}
+
+/// Read `reader` into owned chunks of `chunk_size` bytes.
+///
+/// The last chunk is shorter when the stream length is not a multiple of
+/// `chunk_size`. An empty stream yields no chunks. A zero `chunk_size`
+/// returns [`std::io::ErrorKind::InvalidInput`]. Short reads and
+/// [`std::io::ErrorKind::Interrupted`] are retried until a full chunk or EOF.
+#[cfg(feature = "std")]
+pub fn chunk_reader<R: std::io::Read>(
+    mut reader: R,
+    chunk_size: usize,
+) -> std::io::Result<Vec<Vec<u8>>> {
+    if chunk_size == 0 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            ChunkSizeError,
+        ));
+    }
+    let mut out = Vec::new();
+    loop {
+        let mut buf = vec![0u8; chunk_size];
+        let mut filled = 0usize;
+        while filled < chunk_size {
+            match reader.read(&mut buf[filled..]) {
+                Ok(0) => break,
+                Ok(n) => filled += n,
+                Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(err) => return Err(err),
+            }
+        }
+        if filled == 0 {
+            break;
+        }
+        buf.truncate(filled);
+        out.push(buf);
+        if filled < chunk_size {
+            break;
+        }
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -186,5 +238,47 @@ mod tests {
                 chunk_bytes(&data, size).unwrap().len()
             );
         }
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn chunk_reader_matches_in_memory_split() {
+        use std::io::{self, Cursor, Read};
+
+        let data: Vec<u8> = (0..100).collect();
+        let from_mem = chunk_bytes_owned(&data, 7).unwrap();
+        let from_reader = chunk_reader(Cursor::new(&data), 7).unwrap();
+        assert_eq!(from_reader, from_mem);
+        assert!(chunk_reader(Cursor::new(&[] as &[u8]), 8)
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            chunk_reader(Cursor::new(&data), 0).unwrap_err().kind(),
+            io::ErrorKind::InvalidInput
+        );
+
+        struct InterruptOnce<R> {
+            inner: R,
+            interrupted: bool,
+        }
+        impl<R: Read> Read for InterruptOnce<R> {
+            fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+                if !self.interrupted {
+                    self.interrupted = true;
+                    return Err(io::Error::from(io::ErrorKind::Interrupted));
+                }
+                self.inner.read(buf)
+            }
+        }
+
+        let retried = chunk_reader(
+            InterruptOnce {
+                inner: Cursor::new(&data),
+                interrupted: false,
+            },
+            7,
+        )
+        .unwrap();
+        assert_eq!(retried, from_mem);
     }
 }

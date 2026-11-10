@@ -26,6 +26,11 @@ path = "src/bin/merkle.rs"
 required-features = ["std"]
 doc = false
 
+[[example]]
+name = "file_chunking"
+required-features = ["std"]
+doc = false
+
 [[test]]
 name = "cli_bin"
 path = "tests/cli_bin.rs"
