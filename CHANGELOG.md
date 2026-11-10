@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-10 (no_std CI)
+
+- Add a CI job that builds the library for a bare-metal target with no std, across feature combos
+- Add a small `#![no_std]` smoke crate that uses trees, proofs, multiproofs, the log, and chunking
+- The smoke crate also runs as host tests, so the no_std path is checked for correct results too
+
 ## 2026-11-10
 
 - Split files and byte buffers into fixed-size Merkle leaves, including a streaming reader

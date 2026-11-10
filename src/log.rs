@@ -234,7 +234,7 @@ mod tests {
     use super::*;
     use crate::tree::MerkleTree;
     #[cfg(not(feature = "std"))]
-    use alloc::{string::ToString, vec, vec::Vec};
+    use alloc::string::ToString;
 
     #[test]
     fn empty_log_has_no_root_or_proofs() {
