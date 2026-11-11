@@ -3,6 +3,11 @@
 //! Trees are built bottom-up. Odd layers duplicate the last hash so every
 //! parent has two children. A single-leaf tree's root is exactly that leaf
 //! hash; an empty tree has no root.
+//!
+//! All hashes live in one contiguous buffer. Layer 0 is the leaf hashes;
+//! each later layer is the parents of the one below. A non-empty tree's root
+//! is the last stored hash, so walking a proof only needs index arithmetic
+//! inside that buffer instead of chasing a `Vec` per layer.
 
 #[cfg(not(feature = "std"))]
 use alloc::{string::String, vec::Vec};
@@ -84,27 +89,41 @@ impl core::fmt::Display for MerkleRoot {
 /// SHA-256 is the default. With the `blake3` feature, trees can also be built
 /// over BLAKE3 via [`MerkleTree::try_from_leaves_with`]; the chosen algorithm
 /// is remembered so appends keep hashing the same way.
+///
+/// Hashes are stored leaf-to-root in a single `Vec`. `layer_offsets[i]` is the
+/// start of layer `i` in that buffer; the last offset is the buffer length.
 #[derive(Debug, Clone)]
 pub struct MerkleTree {
-    /// layers[0] = leaf layer (hashed); layers.last()[0] = root
-    layers: Vec<Vec<[u8; 32]>>,
+    /// Leaf hashes, then parent hashes, then the root. Empty iff the tree is empty.
+    hashes: Vec<[u8; 32]>,
+    /// `hashes[layer_offsets[i]..layer_offsets[i + 1]]` is layer `i`.
+    /// Empty iff the tree is empty. Length is `layer_count() + 1` otherwise.
+    layer_offsets: Vec<usize>,
     hasher: TreeHasher,
 }
 
-fn parent_layer(hasher: TreeHasher, prev: &[[u8; 32]]) -> Vec<[u8; 32]> {
-    let mut next = Vec::with_capacity((prev.len() + 1) / 2);
-    let mut i = 0;
-    while i < prev.len() {
-        let left = prev[i];
-        let right = if i + 1 < prev.len() {
-            prev[i + 1]
-        } else {
-            prev[i]
-        };
-        next.push(hasher.nodes(&left, &right));
-        i += 2;
+/// Exact number of hashes stored for a tree with `leaf_count` leaves, using
+/// duplicate-last padding of odd layers (the padded sibling is not stored).
+fn stored_hash_count(leaf_count: usize) -> usize {
+    if leaf_count == 0 {
+        return 0;
     }
-    next
+    let mut n = leaf_count;
+    let mut total = n;
+    while n > 1 {
+        n = (n + 1) / 2;
+        total += n;
+    }
+    total
+}
+
+/// Number of layers (including the leaf layer) for `leaf_count` leaves.
+fn stored_layer_count(leaf_count: usize) -> usize {
+    if leaf_count == 0 {
+        0
+    } else {
+        leaf_count.next_power_of_two().trailing_zeros() as usize + 1
+    }
 }
 
 impl MerkleTree {
@@ -194,25 +213,46 @@ impl MerkleTree {
         Self::from_leaf_hashes(TreeHasher::Sha256, hashes.into_iter().collect())
     }
 
-    fn from_leaf_hashes(hasher: TreeHasher, leaf_hashes: Vec<[u8; 32]>) -> Self {
-        if leaf_hashes.is_empty() {
+    fn from_leaf_hashes(hasher: TreeHasher, mut hashes: Vec<[u8; 32]>) -> Self {
+        if hashes.is_empty() {
             return Self {
-                layers: Vec::new(),
+                hashes,
+                layer_offsets: Vec::new(),
                 hasher,
             };
         }
-        let mut layers = Vec::new();
-        layers.push(leaf_hashes);
+        let leaf_count = hashes.len();
+        hashes.reserve(stored_hash_count(leaf_count) - leaf_count);
+        let mut layer_offsets = Vec::with_capacity(stored_layer_count(leaf_count) + 1);
+        layer_offsets.push(0);
+        let mut layer_start = 0;
         loop {
-            match layers.last() {
-                Some(prev) if prev.len() > 1 => {
-                    let next = parent_layer(hasher, prev);
-                    layers.push(next);
-                }
-                _ => break,
+            let layer_end = hashes.len();
+            layer_offsets.push(layer_end);
+            let layer_len = layer_end - layer_start;
+            if layer_len <= 1 {
+                break;
             }
+            let mut i = layer_start;
+            while i < layer_end {
+                let left = hashes[i];
+                let right = if i + 1 < layer_end {
+                    hashes[i + 1]
+                } else {
+                    hashes[i]
+                };
+                hashes.push(hasher.nodes(&left, &right));
+                i += 2;
+            }
+            layer_start = layer_end;
         }
-        Self { layers, hasher }
+        hashes.shrink_to_fit();
+        layer_offsets.shrink_to_fit();
+        Self {
+            hashes,
+            layer_offsets,
+            hasher,
+        }
     }
 
     /// Append one raw leaf and return its index.
@@ -242,33 +282,43 @@ impl MerkleTree {
     }
 
     /// Append many already-hashed leaves with a single rebuild.
+    ///
+    /// Truncates the buffer back to the leaf layer in place so the existing
+    /// allocation can hold the new parents, then rebuilds upper layers.
     pub fn extend_hashed<I>(&mut self, hashes: I)
     where
         I: IntoIterator<Item = [u8; 32]>,
     {
-        let mut leaf_hashes = self.layers.drain(..).next().unwrap_or_default();
-        leaf_hashes.extend(hashes);
+        let n = self.leaf_count();
+        self.hashes.truncate(n);
+        self.hashes.extend(hashes);
+        let leaf_hashes = core::mem::take(&mut self.hashes);
         *self = Self::from_leaf_hashes(self.hasher, leaf_hashes);
     }
 
     /// `true` when the tree was built from no leaves.
     pub fn is_empty(&self) -> bool {
-        self.layers.is_empty()
+        self.hashes.is_empty()
     }
 
     /// Number of hash layers, including the leaf layer. Zero for an empty tree.
     pub fn layer_count(&self) -> usize {
-        self.layers.len()
+        self.layer_offsets.len().saturating_sub(1)
     }
 
     /// Number of leaves in the tree.
     pub fn leaf_count(&self) -> usize {
-        self.layers.first().map(|v| v.len()).unwrap_or(0)
+        match self.layer_offsets.get(1) {
+            Some(&end) => end,
+            None => 0,
+        }
     }
 
     /// Root hash of the tree. Returns None for an empty tree.
+    ///
+    /// The root is the last hash in the contiguous buffer.
     pub fn root(&self) -> Option<[u8; 32]> {
-        self.layers.last().and_then(|l| l.first().cloned())
+        self.hashes.last().copied()
     }
 
     /// Root hash wrapped in `MerkleRoot`. Returns None for an empty tree.
@@ -283,7 +333,10 @@ impl MerkleTree {
 
     /// Return the hashed leaf at index, if present.
     pub fn leaf_hash_at(&self, index: usize) -> Option<[u8; 32]> {
-        self.layers.first().and_then(|l| l.get(index).cloned())
+        if index >= self.leaf_count() {
+            return None;
+        }
+        self.hashes.get(index).copied()
     }
 
     /// Return leaf metadata (index + hash) at `index`, if present.
@@ -294,15 +347,13 @@ impl MerkleTree {
 
     /// Return metadata for all leaves (index + hash).
     pub fn leaf_infos(&self) -> Vec<LeafInfo> {
-        match self.layers.first() {
-            Some(layer0) => layer0
-                .iter()
-                .cloned()
-                .enumerate()
-                .map(|(index, hash)| LeafInfo { index, hash })
-                .collect(),
-            None => Vec::new(),
-        }
+        self.hashes
+            .iter()
+            .take(self.leaf_count())
+            .copied()
+            .enumerate()
+            .map(|(index, hash)| LeafInfo { index, hash })
+            .collect()
     }
 
     /// Convenience: leaf infos rendered as `(index, hex_hash)` tuples.
@@ -313,18 +364,23 @@ impl MerkleTree {
             .collect()
     }
 
+    /// Slice of hashes at `level` (0 = leaves). Panics if `level` is out of range.
+    fn layer(&self, level: usize) -> &[[u8; 32]] {
+        let start = self.layer_offsets[level];
+        let end = self.layer_offsets[level + 1];
+        &self.hashes[start..end]
+    }
+
     /// Generate an inclusion proof for the leaf at `index`.
     pub fn prove(&self, index: usize) -> Option<InclusionProof> {
-        if self.layers.is_empty() {
-            return None;
-        }
-        if index >= self.layers[0].len() {
+        if index >= self.leaf_count() {
             return None;
         }
         let mut steps = Vec::new();
         let mut idx = index;
-        for level in 0..self.layers.len().saturating_sub(1) {
-            let layer = &self.layers[level];
+        let last_level = self.layer_count().saturating_sub(1);
+        for level in 0..last_level {
+            let layer = self.layer(level);
             let is_right = idx % 2 == 1;
             let sib_idx = if is_right { idx - 1 } else { idx + 1 };
             let sibling = if sib_idx < layer.len() {
@@ -341,7 +397,7 @@ impl MerkleTree {
             steps.push(ProofStep { sibling, side });
             idx /= 2;
         }
-        let leaf_hash = self.layers[0][index];
+        let leaf_hash = self.hashes[index];
         Some(InclusionProof { leaf_hash, steps })
     }
 
@@ -408,6 +464,34 @@ mod tests {
     use crate::proof::{parse_proof_steps, verify_inclusion};
     #[cfg(not(feature = "std"))]
     use alloc::{format, string::String, string::ToString, vec};
+
+    #[test]
+    fn contiguous_buffer_matches_layer_sizes() {
+        for n in 0..=17usize {
+            let leaves: Vec<String> = (0..n).map(|i| format!("l{i}")).collect();
+            let tree = MerkleTree::from_leaves(leaves.iter());
+            assert_eq!(tree.hashes.len(), stored_hash_count(n));
+            assert_eq!(tree.layer_count(), stored_layer_count(n));
+            if n == 0 {
+                assert!(tree.hashes.is_empty());
+                assert!(tree.layer_offsets.is_empty());
+                continue;
+            }
+            assert_eq!(tree.layer_offsets.first().copied(), Some(0));
+            assert_eq!(tree.layer_offsets.last().copied(), Some(tree.hashes.len()));
+            assert_eq!(tree.layer_offsets.len(), tree.layer_count() + 1);
+            let mut expected_len = n;
+            for level in 0..tree.layer_count() {
+                let start = tree.layer_offsets[level];
+                let end = tree.layer_offsets[level + 1];
+                assert_eq!(end - start, expected_len, "n={n} level={level}");
+                assert_eq!(tree.layer(level).len(), expected_len);
+                expected_len = (expected_len + 1) / 2;
+            }
+            assert_eq!(tree.root(), tree.hashes.last().copied());
+            assert_eq!(tree.hashes.capacity(), tree.hashes.len());
+        }
+    }
 
     #[test]
     fn append_matches_fresh_build_and_returns_index() {
