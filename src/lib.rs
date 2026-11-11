@@ -41,7 +41,7 @@
 //! - [`hashing`] — domain-separated SHA-256, hex helpers, and hash placeholders
 //! - [`error`] — length, hex, proof-step, and placeholder-hash errors
 //! - [`proof`] — inclusion proofs, naive multiproofs, and verification
-//! - [`tree`] — [`MerkleTree`], [`MerkleRoot`], and leaf metadata
+//! - [`tree`] — [`MerkleTree`], [`MerkleRoot`], and a contiguous hash buffer
 //! - [`chunk`] — split byte buffers into fixed-size leaves
 //! - [`log`] — append-only log with successive Merkle-root checkpoints
 

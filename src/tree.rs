@@ -314,6 +314,55 @@ impl MerkleTree {
         }
     }
 
+    /// Exact number of hashes a tree with `leaf_count` leaves stores, including
+    /// internal nodes and the root.
+    ///
+    /// Odd layers hash the last node twice for the missing sibling, but the
+    /// duplicate is not stored. For a power-of-two leaf count this is `2n - 1`;
+    /// otherwise it is a little larger because those padded parents exist.
+    ///
+    /// ```
+    /// use merkle_tree::MerkleTree;
+    ///
+    /// let tree = MerkleTree::from_leaves(["a", "b", "c", "d"]);
+    /// assert_eq!(tree.hash_count(), MerkleTree::stored_hash_count(4));
+    /// assert_eq!(MerkleTree::stored_hash_count(4), 7);
+    /// assert_eq!(MerkleTree::stored_hash_count(3), 6);
+    /// ```
+    pub fn stored_hash_count(leaf_count: usize) -> usize {
+        stored_hash_count(leaf_count)
+    }
+
+    /// Total number of stored hashes, including internal nodes and the root.
+    pub fn hash_count(&self) -> usize {
+        self.hashes.len()
+    }
+
+    /// Bytes occupied by stored hashes (`32 * hash_count`).
+    ///
+    /// This is the payload size of the contiguous buffer, not `Vec` capacity
+    /// overhead or the small offset table.
+    pub fn storage_bytes(&self) -> usize {
+        self.hash_count() * 32
+    }
+
+    /// Number of hashes at `level` (0 = leaves). `None` if out of range.
+    pub fn layer_len(&self, level: usize) -> Option<usize> {
+        let start = self.layer_offsets.get(level).copied()?;
+        let end = self.layer_offsets.get(level + 1).copied()?;
+        Some(end - start)
+    }
+
+    /// Borrow the hashes of layer `level` (0 = leaves). `None` if out of range.
+    ///
+    /// Layers are adjacent slices of the same buffer: the end of layer `i` is
+    /// the start of layer `i + 1`, and the last layer is the single root hash.
+    pub fn layer_hashes(&self, level: usize) -> Option<&[[u8; 32]]> {
+        let start = *self.layer_offsets.get(level)?;
+        let end = *self.layer_offsets.get(level + 1)?;
+        Some(&self.hashes[start..end])
+    }
+
     /// Root hash of the tree. Returns None for an empty tree.
     ///
     /// The root is the last hash in the contiguous buffer.
@@ -490,7 +539,31 @@ mod tests {
             }
             assert_eq!(tree.root(), tree.hashes.last().copied());
             assert_eq!(tree.hashes.capacity(), tree.hashes.len());
+            assert_eq!(tree.hash_count(), stored_hash_count(n));
+            assert_eq!(tree.hash_count(), MerkleTree::stored_hash_count(n));
+            assert_eq!(tree.storage_bytes(), tree.hash_count() * 32);
+            assert_eq!(tree.layer_len(tree.layer_count()), None);
+            assert_eq!(tree.layer_hashes(tree.layer_count()), None);
+            if n >= 1 {
+                let leaves = tree.layer_hashes(0).expect("leaf layer");
+                assert_eq!(leaves.len(), n);
+                assert_eq!(tree.layer_len(0), Some(n));
+                let root_layer = tree.layer_hashes(tree.layer_count() - 1).expect("root");
+                assert_eq!(root_layer, core::slice::from_ref(&tree.root().unwrap()));
+                for (i, leaf) in leaves.iter().enumerate() {
+                    assert_eq!(tree.leaf_hash_at(i).as_ref(), Some(leaf));
+                }
+            }
         }
+        assert_eq!(MerkleTree::stored_hash_count(0), 0);
+        assert_eq!(MerkleTree::stored_hash_count(1), 1);
+        assert_eq!(MerkleTree::stored_hash_count(2), 3);
+        assert_eq!(MerkleTree::stored_hash_count(8), 15);
+        let empty = MerkleTree::from_leaves(core::iter::empty::<&[u8]>());
+        assert_eq!(empty.hash_count(), 0);
+        assert_eq!(empty.storage_bytes(), 0);
+        assert_eq!(empty.layer_len(0), None);
+        assert_eq!(empty.layer_hashes(0), None);
     }
 
     #[test]
