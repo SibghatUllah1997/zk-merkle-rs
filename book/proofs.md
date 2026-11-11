@@ -35,3 +35,27 @@ check the original leaf bytes against each entry, in the same order.
 
 An empty bundle is vacuously true for any root. That matches "no claims were
 made", not "the tree is empty".
+
+## Many proofs from one tree
+
+`prove` re-derives every step with index arithmetic: halve the index, find
+the layer offset, flip the low bit, and check for a padded layer. When one
+tree serves many proof requests, `proof_index_cache()` does that work once:
+
+```rust,ignore
+let tree = MerkleTree::from_leaves(["a", "b", "c", "d", "e"]);
+let cache = tree.proof_index_cache();
+let proof = cache.prove(4).expect("in range");
+assert_eq!(Some(proof), tree.prove(4));
+```
+
+The cache keeps two tables, one entry per stored hash: the buffer position
+of each node's parent and of its sibling. A padded last node is its own
+sibling, and the root is its own parent, which is where a walk stops.
+
+- Proofs are byte-for-byte the same as `prove`; only assembly changes.
+- Cost is two `usize` per stored hash (`table_bytes()`), so it is opt-in.
+- The cache borrows the tree. `append` / `extend` need `&mut`, so the
+  compiler rejects a stale cache; build a new one after the tree changes.
+- The gain is modest: the hashes are already in one flat buffer, so the
+  main win is skipping per-step arithmetic in hot loops like `prove_all`.

@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-11 (proof cache)
+
+- Add `ProofIndexCache`: parent and sibling positions precomputed once per tree, so each proof is a walk of table lookups
+- Cached proofs are identical to `prove`, checked across tree sizes and with property tests
+- Bench compares direct and cached `prove_all`; the book explains the memory trade-off
+
 ## 2026-11-11
 
 - Store every Merkle hash in one contiguous buffer, with helpers for hash count, byte cost, and per-layer slices
