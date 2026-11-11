@@ -113,3 +113,20 @@ jobs:
         run: |
           cargo test
           cargo test --features serde,blake3
+
+  book:
+    name: mdbook
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install mdBook
+        run: |
+          tag=v0.4.43
+          curl -sSL "https://github.com/rust-lang/mdBook/releases/download/${tag}/mdbook-${tag}-x86_64-unknown-linux-gnu.tar.gz" | tar -xz
+          sudo mv mdbook /usr/local/bin/
+          mdbook --version
+
+      - name: Build the book
+        run: mdbook build

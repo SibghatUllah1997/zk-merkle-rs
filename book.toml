@@ -1,0 +1,14 @@
+[book]
+title = "merkle-tree"
+authors = ["HM Sibghat Ullah"]
+description = "SHA-256 Merkle trees with inclusion proofs: hashing, padding, layout, and verification"
+language = "en"
+src = "book"
+
+[build]
+build-dir = "target/book"
+
+[output.html]
+git-repository-url = "https://github.com/SibghatUllah1997/zk-merkle-rs"
+edit-url-template = "https://github.com/SibghatUllah1997/zk-merkle-rs/edit/main/{path}"
+site-url = "/zk-merkle-rs/"
