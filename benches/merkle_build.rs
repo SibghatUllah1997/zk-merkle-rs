@@ -33,6 +33,23 @@ fn bench_once_prove(n: usize) -> Duration {
     start.elapsed()
 }
 
+fn bench_prove_all(n: usize) -> (Duration, Duration) {
+    let leaves = generate_leaves(n);
+    let tree = MerkleTree::from_leaves(leaves.iter().map(|v| v.as_slice()));
+
+    let start = Instant::now();
+    let direct = tree.prove_all();
+    let direct_time = start.elapsed();
+
+    let start = Instant::now();
+    let cache = tree.proof_index_cache();
+    let cached = cache.prove_all();
+    let cached_time = start.elapsed();
+
+    assert_eq!(direct, cached);
+    (direct_time, cached_time)
+}
+
 fn run_microbenches() {
     let sizes = [8usize, 64, 512, 4096];
     println!("Microbenchmarks (wall-clock, one-shot):");
@@ -40,6 +57,11 @@ fn run_microbenches() {
         let tb = bench_once_build(n);
         let tp = bench_once_prove(n);
         println!("  n={:<5} build={:?} prove(3 positions)={:?}", n, tb, tp);
+    }
+    println!("prove_all: direct vs cached (cache build included):");
+    for &n in &sizes {
+        let (direct, cached) = bench_prove_all(n);
+        println!("  n={:<5} direct={:?} cached={:?}", n, direct, cached);
     }
 }
 
