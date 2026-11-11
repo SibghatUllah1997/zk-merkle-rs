@@ -30,6 +30,11 @@ proptest! {
         prop_assert_eq!(tree.root(), fresh.root());
         prop_assert_eq!(tree.leaf_count(), fresh.leaf_count());
         prop_assert_eq!(tree.layer_count(), fresh.layer_count());
+        prop_assert_eq!(tree.hash_count(), fresh.hash_count());
+        prop_assert_eq!(tree.storage_bytes(), fresh.storage_bytes());
+        for level in 0..tree.layer_count() {
+            prop_assert_eq!(tree.layer_hashes(level), fresh.layer_hashes(level));
+        }
     }
 
     #[test]

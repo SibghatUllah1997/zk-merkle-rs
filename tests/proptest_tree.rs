@@ -49,6 +49,10 @@ proptest! {
         prop_assert_eq!(tree.leaf_count(), leaves.len());
         prop_assert_eq!(tree.is_empty(), leaves.is_empty());
         prop_assert_eq!(tree.layer_count(), expected_layer_count(leaves.len()));
+        prop_assert_eq!(tree.hash_count(), MerkleTree::stored_hash_count(leaves.len()));
+        prop_assert_eq!(tree.hash_count(), collected.hash_count());
+        prop_assert_eq!(tree.hash_count(), hashed.hash_count());
+        prop_assert_eq!(tree.storage_bytes(), tree.hash_count() * 32);
         prop_assert_eq!(tree.root(), collected.root());
         prop_assert_eq!(tree.root(), hashed.root());
         prop_assert_eq!(tree.leaf_infos(), collected.leaf_infos());
@@ -153,5 +157,45 @@ proptest! {
         let all = tree.prove_all();
         prop_assert_eq!(all.len(), n);
         prop_assert!(all.verify(root));
+    }
+
+    #[test]
+    fn contiguous_layers_cover_the_buffer_without_gaps(leaves in any_leaves()) {
+        let tree = MerkleTree::from_leaves(leaves.iter());
+        let n = leaves.len();
+        prop_assert_eq!(tree.layer_len(tree.layer_count()), None);
+        prop_assert!(tree.layer_hashes(tree.layer_count()).is_none());
+
+        if n == 0 {
+            prop_assert_eq!(tree.hash_count(), 0);
+            prop_assert!(tree.layer_hashes(0).is_none());
+            return Ok(());
+        }
+
+        let mut expected_len = n;
+        let mut covered = 0usize;
+        let mut previous_end: Option<usize> = None;
+        for level in 0..tree.layer_count() {
+            let layer = tree.layer_hashes(level).expect("in range");
+            prop_assert_eq!(tree.layer_len(level), Some(expected_len));
+            prop_assert_eq!(layer.len(), expected_len);
+            let start = layer.as_ptr() as usize;
+            if let Some(end) = previous_end {
+                prop_assert_eq!(start, end);
+            }
+            previous_end = Some(start + layer.len() * 32);
+            covered += layer.len();
+            expected_len = (expected_len + 1) / 2;
+        }
+        prop_assert_eq!(covered, tree.hash_count());
+        let root = tree.root().expect("root");
+        let root_layer = tree.layer_hashes(tree.layer_count() - 1).expect("root layer");
+        prop_assert_eq!(root_layer, core::slice::from_ref(&root));
+
+        let leaf_layer = tree.layer_hashes(0).expect("leaves");
+        for (i, leaf) in leaves.iter().enumerate() {
+            prop_assert_eq!(leaf_layer[i], hash_leaf(leaf));
+            prop_assert_eq!(tree.leaf_hash_at(i), Some(leaf_layer[i]));
+        }
     }
 }
