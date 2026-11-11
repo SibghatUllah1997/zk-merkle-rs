@@ -43,6 +43,7 @@
 //! - [`error`] — length, hex, proof-step, and placeholder-hash errors
 //! - [`proof`] — inclusion proofs, naive multiproofs, and verification
 //! - [`tree`] — [`MerkleTree`], [`MerkleRoot`], and a contiguous hash buffer
+//! - [`cache`] — [`ProofIndexCache`] for many proofs from one tree
 //! - [`chunk`] — split byte buffers into fixed-size leaves
 //! - [`log`] — append-only log with successive Merkle-root checkpoints
 
@@ -58,6 +59,8 @@ extern crate alloc;
 #[cfg(feature = "std")]
 pub mod cli;
 
+/// Cached parent/sibling positions for repeated proof generation.
+pub mod cache;
 /// Split byte buffers into fixed-size Merkle-tree leaves.
 pub mod chunk;
 /// Recoverable conversion and parse errors.
@@ -71,6 +74,7 @@ pub mod proof;
 /// Merkle tree construction, typed roots, and leaf metadata.
 pub mod tree;
 
+pub use cache::ProofIndexCache;
 #[cfg(feature = "std")]
 pub use chunk::chunk_reader;
 pub use chunk::{chunk_bytes, chunk_bytes_owned, chunk_count, ChunkSizeError, Chunks};

@@ -12,6 +12,7 @@
 #[cfg(not(feature = "std"))]
 use alloc::{string::String, vec::Vec};
 
+use crate::cache::ProofIndexCache;
 use crate::error::{try_array32, HashNotImplemented, HexError, LengthError};
 use crate::hashing::{to_hex32, try_from_hex32, HashAlgorithm, TreeHasher};
 use crate::proof::{InclusionProof, IndexedInclusionProof, MultiProof, ProofStep, SiblingSide};
@@ -411,6 +412,33 @@ impl MerkleTree {
             .into_iter()
             .map(|li| (li.index, to_hex32(&li.hash)))
             .collect()
+    }
+
+    /// Whole contiguous hash buffer, leaf layer first and root last.
+    pub(crate) fn hash_buffer(&self) -> &[[u8; 32]] {
+        &self.hashes
+    }
+
+    /// Layer start offsets into [`Self::hash_buffer`], plus the final length.
+    pub(crate) fn layer_offsets(&self) -> &[usize] {
+        &self.layer_offsets
+    }
+
+    /// Precompute parent and sibling positions for fast repeated proofs.
+    ///
+    /// Building the cache is one pass over the buffer. Afterwards every proof
+    /// is a chain of table lookups; see [`ProofIndexCache`]. The cache
+    /// borrows `self`, so the tree cannot change while it is alive.
+    ///
+    /// ```
+    /// use merkle_tree::MerkleTree;
+    ///
+    /// let tree = MerkleTree::from_leaves(["a", "b", "c"]);
+    /// let cache = tree.proof_index_cache();
+    /// assert_eq!(cache.prove_all(), tree.prove_all());
+    /// ```
+    pub fn proof_index_cache(&self) -> ProofIndexCache<'_> {
+        ProofIndexCache::new(self)
     }
 
     /// Slice of hashes at `level` (0 = leaves). Panics if `level` is out of range.

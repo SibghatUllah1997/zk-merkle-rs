@@ -26,7 +26,7 @@ This project will evolve from a simple educational Merkle tree to a more feature
 22. Add example: file chunking into leaves [x]
 23. Add example: simple append-only log with roots [x]
 24. Optimize memory layout for large trees [x]
-25. Optimize proof generation by caching parent indices
+25. Optimize proof generation by caching parent indices [x]
 26. Add multiproof format and verifier
 27. Add zk-friendly hash implementation (Poseidon) via audited crate
 28. Add preimage resistance considerations and security notes
