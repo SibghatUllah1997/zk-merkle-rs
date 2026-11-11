@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-11-11
+
+- Store every Merkle hash in one contiguous buffer, with helpers for hash count, byte cost, and per-layer slices
+- Add an mdBook site covering hashing, padding, proofs, and that layout; CI builds the book on every push
+
 ## 2026-11-10 (no_std CI)
 
 - Add a CI job that builds the library for a bare-metal target with no std, across feature combos

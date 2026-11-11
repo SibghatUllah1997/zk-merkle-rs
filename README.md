@@ -24,6 +24,8 @@ Fast, tiny, no_std-friendly SHA-256 Merkle tree with inclusion proofs and a clea
 - Hash placeholders: `poseidon` and `rescue` features expose stubs that return `HashNotImplemented`
 - Chunking: split buffers or `Read` streams into fixed-size leaves (`chunk_bytes`, `chunk_reader`)
 - Append-only log: `MerkleLog` records a root checkpoint after each append or batch
+- Contiguous layout: all hashes sit in one buffer; `hash_count`, `storage_bytes`, and `layer_hashes` expose it
+- Book: `mdbook build` / `mdbook serve` from the repo root (source in `book/`)
 - Clear domain separation:
   - Leaf hash: H(0x00 || data)
   - Internal node hash: H(0x01 || left || right)
@@ -121,7 +123,7 @@ graph TD
 - Hash stubs: `cargo test --features poseidon,rescue` (functions return `HashNotImplemented`)
 - BLAKE3: `cargo test --features blake3` and `cargo test --no-default-features --features blake3`
 - Format and lints: `cargo fmt --all --check` and `cargo clippy --all-targets --all-features -D warnings`
-- Docs: `cargo doc --no-deps`
+- Docs: `cargo doc --no-deps` for the API, `mdbook build` for the longer-form book (`book/`)
 
 ### Roadmap
 See `ROADMAP.md` for milestones and upcoming work.

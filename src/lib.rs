@@ -36,6 +36,7 @@
 //! - Multiproofs are a list of independent paths; overlapping siblings are not
 //!   shared yet
 //! - Poseidon and Rescue names exist behind feature flags but do not hash yet
+//! - Hashes are stored leaf-to-root in one buffer; see [`MerkleTree::hash_count`]
 //!
 //! Layout:
 //! - [`hashing`] — domain-separated SHA-256, hex helpers, and hash placeholders

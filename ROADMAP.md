@@ -22,10 +22,10 @@ This project will evolve from a simple educational Merkle tree to a more feature
 18. Add Poseidon/Rescue skeletons behind feature flags (no impl yet) [x]
 19. Integrate blake3 as an alternative hash (feature flag) [x]
 20. Add `no_std` CI job [x]
-21. Add documentation site (mdbook) scaffold
+21. Add documentation site (mdbook) scaffold [x]
 22. Add example: file chunking into leaves [x]
 23. Add example: simple append-only log with roots [x]
-24. Optimize memory layout for large trees
+24. Optimize memory layout for large trees [x]
 25. Optimize proof generation by caching parent indices
 26. Add multiproof format and verifier
 27. Add zk-friendly hash implementation (Poseidon) via audited crate
