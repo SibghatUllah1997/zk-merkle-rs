@@ -36,6 +36,8 @@
 //! - Internal node hash: H(0x01 || left || right)
 //! - Odd layers are padded by duplicating the last element (except a single-leaf
 //!   tree, whose root is exactly the leaf hash)
+//! - [`MerkleTree::committed_root`] binds the root to the leaf count, so a
+//!   duplicated last leaf cannot pass as a different tree
 //! - Hash function: sha2::Sha256 (audited crate; no hand-rolled crypto)
 //! - Multiproofs are a list of independent paths; [`CompactMultiProof`]
 //!   stores overlapping siblings once
@@ -87,8 +89,8 @@ pub use error::{try_array32, HashNotImplemented, HexError, LengthError, ParseSte
 #[cfg(feature = "blake3")]
 pub use hashing::{blake3_hash_leaf, blake3_hash_nodes};
 pub use hashing::{
-    from_hex, hash_leaf, hash_leaf_with, hash_nodes, hash_nodes_with, to_hex, to_hex32,
-    try_from_hex32, HashAlgorithm, LEAF_PREFIX, NODE_PREFIX,
+    commit_root, from_hex, hash_leaf, hash_leaf_with, hash_nodes, hash_nodes_with, to_hex,
+    to_hex32, try_from_hex32, HashAlgorithm, LEAF_PREFIX, NODE_PREFIX, ROOT_COMMIT_PREFIX,
 };
 #[cfg(feature = "poseidon")]
 pub use hashing::{
@@ -98,7 +100,7 @@ pub use hashing::{
 pub use hashing::{rescue_hash_leaf, rescue_hash_nodes, RESCUE_LEAF_PREFIX, RESCUE_NODE_PREFIX};
 pub use log::{LogCheckpoint, MerkleLog};
 pub use proof::{
-    parse_proof_steps, verify_compact, verify_inclusion, verify_inclusion_compact,
+    parse_proof_steps, proof_depth, verify_compact, verify_inclusion, verify_inclusion_compact,
     verify_inclusion_compact_with, verify_inclusion_many, verify_inclusion_many_with,
     verify_inclusion_with, verify_multiproof, CompactMultiProof, InclusionProof,
     IndexedInclusionProof, MultiProof, ProofStep, SiblingSide,
