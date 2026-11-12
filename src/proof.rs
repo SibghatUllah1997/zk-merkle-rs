@@ -4,11 +4,10 @@
 //! to (but not including) the root. Each step records whether the sibling sits
 //! on the left or the right so the verifier can rebuild the same parent hashes.
 //!
-//! [`MultiProof`] is a naive bundle of those single-leaf paths. It does not
-//! share overlapping siblings; a later format can compress that.
-//!
-//! [`MultiProof`] is a naive bundle of those single-leaf paths. It does not
-//! share overlapping siblings; a later format can compress that.
+//! [`MultiProof`] is a naive bundle of those single-leaf paths. Overlapping
+//! siblings are repeated. [`CompactMultiProof`] stores each shared sibling
+//! once and records the tree's leaf count so a verifier can apply the same
+//! duplicate-last padding the tree used.
 
 #[cfg(not(feature = "std"))]
 use alloc::{string::String, vec::Vec};
@@ -269,6 +268,129 @@ impl core::fmt::Display for MultiProof {
                 write!(f, "; ")?;
             }
             write!(f, "index={}, {}", item.index, item.proof)?;
+        }
+        write!(f, "]")
+    }
+}
+
+/// How a known node at one layer relates to its sibling.
+///
+/// Compact proof generation and verification walk layers with the same
+/// pairing rule: sorted known indices, duplicate-last padding, and one
+/// consumed sibling hash whenever the sibling is not already known.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CompactSibling {
+    /// Odd last node: the missing sibling is a copy of this node.
+    DuplicatePad,
+    /// The next known index is this node's sibling; hash both together.
+    KnownPair,
+    /// The sibling is not among the known indices; it comes from the tree
+    /// (prover) or from the compact sibling list (verifier).
+    External,
+}
+
+/// Classify `index` against the next sorted known index at a layer of
+/// `layer_len` hashes.
+pub(crate) fn classify_compact_sibling(
+    index: usize,
+    next_known: Option<usize>,
+    layer_len: usize,
+) -> CompactSibling {
+    let sibling = index ^ 1;
+    if sibling >= layer_len {
+        CompactSibling::DuplicatePad
+    } else if next_known == Some(sibling) {
+        CompactSibling::KnownPair
+    } else {
+        CompactSibling::External
+    }
+}
+
+/// Sort `indices`, drop duplicates, and reject anything `>= leaf_count`.
+pub(crate) fn unique_sorted_indices<I>(indices: I, leaf_count: usize) -> Option<Vec<usize>>
+where
+    I: IntoIterator<Item = usize>,
+{
+    let mut out: Vec<usize> = indices.into_iter().collect();
+    for &index in &out {
+        if index >= leaf_count {
+            return None;
+        }
+    }
+    out.sort_unstable();
+    out.dedup();
+    Some(out)
+}
+
+/// Compact multi-leaf inclusion proof: shared siblings stored once.
+///
+/// `indices` are unique and sorted. `leaves[i]` is the leaf hash at
+/// `indices[i]`. `siblings` is the extra hashes a verifier needs, in the
+/// order a bottom-up walk consumes them. `leaf_count` is the size of the
+/// tree the proof was built from, so odd layers pad the same way.
+///
+/// An empty index list is a vacuous proof: it makes no claims. Proving every
+/// leaf yields an empty sibling list, because every parent is determined by
+/// the provided leaves.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CompactMultiProof {
+    /// Number of leaves in the tree this proof was generated from.
+    pub leaf_count: usize,
+    /// Sorted unique leaf indices covered by this proof.
+    pub indices: Vec<usize>,
+    /// Leaf hashes matching [`Self::indices`].
+    pub leaves: Vec<[u8; 32]>,
+    /// Sibling hashes consumed left-to-right, leaf layer toward the root.
+    pub siblings: Vec<[u8; 32]>,
+}
+
+impl CompactMultiProof {
+    /// Number of leaves covered by this proof.
+    pub fn len(&self) -> usize {
+        self.indices.len()
+    }
+
+    /// `true` when no leaves are claimed.
+    pub fn is_empty(&self) -> bool {
+        self.indices.is_empty()
+    }
+
+    /// Borrow the sorted unique indices.
+    pub fn indices(&self) -> &[usize] {
+        &self.indices
+    }
+
+    /// Number of extra sibling hashes stored in this proof.
+    pub fn sibling_count(&self) -> usize {
+        self.siblings.len()
+    }
+
+    /// Leaf hashes as lowercase hex, in index order.
+    pub fn leaves_hex(&self) -> Vec<String> {
+        self.leaves.iter().map(to_hex32).collect()
+    }
+
+    /// Sibling hashes as lowercase hex, in consumption order.
+    pub fn siblings_hex(&self) -> Vec<String> {
+        self.siblings.iter().map(to_hex32).collect()
+    }
+}
+
+impl core::fmt::Display for CompactMultiProof {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "leaf_count={}, leaves={}, siblings={}, indices=[",
+            self.leaf_count,
+            self.leaves.len(),
+            self.siblings.len()
+        )?;
+        for (i, index) in self.indices.iter().enumerate() {
+            if i > 0 {
+                write!(f, ", ")?;
+            }
+            write!(f, "{index}")?;
         }
         write!(f, "]")
     }
@@ -539,5 +661,57 @@ mod tests {
             &proof,
             root
         ));
+    }
+
+    #[test]
+    fn compact_sibling_classification_matches_padding_and_pairs() {
+        assert_eq!(
+            classify_compact_sibling(0, Some(1), 4),
+            CompactSibling::KnownPair
+        );
+        assert_eq!(
+            classify_compact_sibling(0, Some(2), 4),
+            CompactSibling::External
+        );
+        assert_eq!(
+            classify_compact_sibling(1, None, 4),
+            CompactSibling::External
+        );
+        assert_eq!(
+            classify_compact_sibling(2, None, 3),
+            CompactSibling::DuplicatePad
+        );
+        assert_eq!(
+            classify_compact_sibling(4, None, 5),
+            CompactSibling::DuplicatePad
+        );
+    }
+
+    #[test]
+    fn unique_sorted_indices_dedups_and_rejects_oob() {
+        assert_eq!(
+            unique_sorted_indices([2, 0, 2, 1], 4).unwrap(),
+            vec![0, 1, 2]
+        );
+        assert!(unique_sorted_indices([0, 4], 4).is_none());
+        assert!(unique_sorted_indices([0], 0).is_none());
+        assert!(unique_sorted_indices(core::iter::empty::<usize>(), 0)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn empty_compact_multiproof_displays() {
+        let proof = CompactMultiProof::default();
+        assert!(proof.is_empty());
+        assert_eq!(proof.len(), 0);
+        assert_eq!(proof.sibling_count(), 0);
+        assert!(proof.indices().is_empty());
+        assert!(proof.leaves_hex().is_empty());
+        assert!(proof.siblings_hex().is_empty());
+        assert_eq!(
+            proof.to_string(),
+            "leaf_count=0, leaves=0, siblings=0, indices=[]"
+        );
     }
 }

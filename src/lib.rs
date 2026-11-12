@@ -33,8 +33,8 @@
 //! - Odd layers are padded by duplicating the last element (except a single-leaf
 //!   tree, whose root is exactly the leaf hash)
 //! - Hash function: sha2::Sha256 (audited crate; no hand-rolled crypto)
-//! - Multiproofs are a list of independent paths; overlapping siblings are not
-//!   shared yet
+//! - Multiproofs are a list of independent paths; [`CompactMultiProof`]
+//!   stores overlapping siblings once
 //! - Poseidon and Rescue names exist behind feature flags but do not hash yet
 //! - Hashes are stored leaf-to-root in one buffer; see [`MerkleTree::hash_count`]
 //!
@@ -69,7 +69,7 @@ pub mod error;
 pub mod hashing;
 /// Append-only log with successive Merkle-root checkpoints.
 pub mod log;
-/// Inclusion proofs, compact L/R step encoding, and naive multiproofs.
+/// Inclusion proofs, compact L/R step encoding, and multi-leaf proofs.
 pub mod proof;
 /// Merkle tree construction, typed roots, and leaf metadata.
 pub mod tree;
@@ -94,7 +94,7 @@ pub use hashing::{rescue_hash_leaf, rescue_hash_nodes, RESCUE_LEAF_PREFIX, RESCU
 pub use log::{LogCheckpoint, MerkleLog};
 pub use proof::{
     parse_proof_steps, verify_inclusion, verify_inclusion_many, verify_inclusion_many_with,
-    verify_inclusion_with, verify_multiproof, InclusionProof, IndexedInclusionProof, MultiProof,
-    ProofStep, SiblingSide,
+    verify_inclusion_with, verify_multiproof, CompactMultiProof, InclusionProof,
+    IndexedInclusionProof, MultiProof, ProofStep, SiblingSide,
 };
 pub use tree::{LeafInfo, MerkleRoot, MerkleTree};

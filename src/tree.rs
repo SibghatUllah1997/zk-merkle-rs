@@ -15,7 +15,10 @@ use alloc::{string::String, vec::Vec};
 use crate::cache::ProofIndexCache;
 use crate::error::{try_array32, HashNotImplemented, HexError, LengthError};
 use crate::hashing::{to_hex32, try_from_hex32, HashAlgorithm, TreeHasher};
-use crate::proof::{InclusionProof, IndexedInclusionProof, MultiProof, ProofStep, SiblingSide};
+use crate::proof::{
+    classify_compact_sibling, unique_sorted_indices, CompactMultiProof, CompactSibling,
+    InclusionProof, IndexedInclusionProof, MultiProof, ProofStep, SiblingSide,
+};
 
 /// Minimal per-leaf metadata: the leaf's index and its hashed value.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -517,6 +520,84 @@ impl MerkleTree {
     pub fn prove_all(&self) -> MultiProof {
         self.prove_many(0..self.leaf_count()).unwrap_or_default()
     }
+
+    /// Generate a compact multiproof for `indices`.
+    ///
+    /// Indices are sorted and de-duplicated. A sibling that sits on more than
+    /// one proved path is stored once. Returns `None` if any index is out of
+    /// range. An empty `indices` list yields an empty [`CompactMultiProof`],
+    /// including on an empty tree.
+    ///
+    /// ```
+    /// use merkle_tree::MerkleTree;
+    ///
+    /// let tree = MerkleTree::from_leaves(["a", "b", "c", "d"]);
+    /// let compact = tree.prove_compact([0, 1]).expect("in range");
+    /// assert_eq!(compact.indices(), &[0, 1]);
+    /// assert_eq!(compact.sibling_count(), 1);
+    /// ```
+    pub fn prove_compact<I>(&self, indices: I) -> Option<CompactMultiProof>
+    where
+        I: IntoIterator<Item = usize>,
+    {
+        let leaf_count = self.leaf_count();
+        let indices = unique_sorted_indices(indices, leaf_count)?;
+        if indices.is_empty() {
+            return Some(CompactMultiProof {
+                leaf_count,
+                indices,
+                leaves: Vec::new(),
+                siblings: Vec::new(),
+            });
+        }
+
+        let leaves: Vec<[u8; 32]> = indices.iter().map(|&i| self.hashes[i]).collect();
+        let mut siblings = Vec::new();
+        let mut known = indices.clone();
+        let mut layer_len = leaf_count;
+        let last_level = self.layer_count().saturating_sub(1);
+
+        for level in 0..last_level {
+            let layer = self.layer(level);
+            let mut parents = Vec::with_capacity(known.len());
+            let mut i = 0;
+            while i < known.len() {
+                let idx = known[i];
+                let next = known.get(i + 1).copied();
+                match classify_compact_sibling(idx, next, layer_len) {
+                    CompactSibling::DuplicatePad => {}
+                    CompactSibling::KnownPair => {
+                        i += 1;
+                    }
+                    CompactSibling::External => {
+                        siblings.push(layer[idx ^ 1]);
+                    }
+                }
+                let parent = idx / 2;
+                if parents.last().copied() != Some(parent) {
+                    parents.push(parent);
+                }
+                i += 1;
+            }
+            known = parents;
+            layer_len = (layer_len + 1) / 2;
+        }
+
+        Some(CompactMultiProof {
+            leaf_count,
+            indices,
+            leaves,
+            siblings,
+        })
+    }
+
+    /// Compact multiproof covering every leaf, in index order.
+    ///
+    /// Always succeeds. Because every leaf is provided, the sibling list is
+    /// empty: each parent is determined by the claimed leaves (and padding).
+    pub fn prove_compact_all(&self) -> CompactMultiProof {
+        self.prove_compact(0..self.leaf_count()).unwrap_or_default()
+    }
 }
 
 impl<T: AsRef<[u8]>> core::iter::FromIterator<T> for MerkleTree {
@@ -927,6 +1008,46 @@ mod tests {
         assert!(multi.verify(root));
         assert_eq!(multi.proofs[0].proof, tree.prove(0).unwrap());
         assert_eq!(multi.proofs[1].proof, tree.prove(2).unwrap());
+    }
+
+    #[test]
+    fn prove_compact_sorts_dedups_and_matches_leaf_hashes() {
+        let tree = MerkleTree::from_leaves(["a", "b", "c", "d"]);
+        let compact = tree.prove_compact([2, 0, 2]).expect("in range");
+        assert_eq!(compact.leaf_count, 4);
+        assert_eq!(compact.indices(), &[0, 2]);
+        assert_eq!(compact.leaves, vec![hash_leaf(b"a"), hash_leaf(b"c")]);
+        assert_eq!(compact.leaves_hex().len(), 2);
+        assert!(tree.prove_compact([0, 99]).is_none());
+        assert!(tree.prove_compact([4]).is_none());
+    }
+
+    #[test]
+    fn prove_compact_all_has_no_siblings() {
+        for n in 0..=9usize {
+            let leaves: Vec<String> = (0..n).map(|i| format!("l{i}")).collect();
+            let tree = MerkleTree::from_leaves(leaves.iter());
+            let compact = tree.prove_compact_all();
+            assert_eq!(compact.leaf_count, n);
+            assert_eq!(compact.indices, (0..n).collect::<Vec<_>>());
+            assert!(compact.siblings.is_empty(), "n={n}");
+            if n == 0 {
+                assert!(compact.is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn prove_compact_adjacent_pair_stores_one_sibling() {
+        let tree = MerkleTree::from_leaves(["a", "b", "c", "d"]);
+        let compact = tree.prove_compact([0, 1]).expect("in range");
+        assert_eq!(compact.sibling_count(), 1);
+        let naive = tree.prove_many([0, 1]).expect("in range");
+        let naive_hashes: usize = naive.proofs.iter().map(|p| p.proof.steps.len()).sum();
+        assert!(compact.sibling_count() < naive_hashes);
+        let shown = compact.to_string();
+        assert!(shown.contains("leaf_count=4"));
+        assert!(shown.contains("indices=[0, 1]"));
     }
 
     #[test]
