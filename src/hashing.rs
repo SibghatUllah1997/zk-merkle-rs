@@ -11,8 +11,10 @@
 //!
 //! Alternative hashes can be selected through [`HashAlgorithm`]. SHA-256 is
 //! always implemented. BLAKE3 is implemented behind the `blake3` feature and
-//! uses the same `0x00`/`0x01` prefixes. Poseidon and Rescue are feature-gated
-//! placeholders that return [`crate::error::HashNotImplemented`].
+//! uses the same `0x00`/`0x01` prefixes. Poseidon (the `poseidon` feature) is
+//! circom-compatible BN254 x^5 via `light-poseidon-nostd`, with its own
+//! `0x10`/`0x11` domain tags. Rescue remains a placeholder that returns
+//! [`crate::error::HashNotImplemented`].
 
 #[cfg(not(feature = "std"))]
 use alloc::{string::String, vec::Vec};
@@ -21,19 +23,31 @@ use sha2::{Digest, Sha256};
 
 use crate::error::{HashNotImplemented, HexError};
 
+#[cfg(feature = "poseidon")]
+use ark_bn254::Fr;
+#[cfg(feature = "poseidon")]
+use ark_ff::{BigInteger, PrimeField};
+#[cfg(feature = "poseidon")]
+use light_poseidon_nostd::{Poseidon, PoseidonHasher};
+
 /// Domain-separation prefix prepended to raw leaf data before hashing.
 pub const LEAF_PREFIX: u8 = 0x00;
 
 /// Domain-separation prefix prepended to concatenated child hashes.
 pub const NODE_PREFIX: u8 = 0x01;
 
-/// Reserved leaf prefix for a future Poseidon binding (not hashed yet).
+/// Domain tag mixed into Poseidon leaf hashes (`0x10`).
 #[cfg(feature = "poseidon")]
 pub const POSEIDON_LEAF_PREFIX: u8 = 0x10;
 
-/// Reserved parent-node prefix for a future Poseidon binding.
+/// Domain tag mixed into Poseidon parent-node hashes (`0x11`).
 #[cfg(feature = "poseidon")]
 pub const POSEIDON_NODE_PREFIX: u8 = 0x11;
+
+/// Bytes packed into one BN254 field element. 31 bytes is always smaller
+/// than the 254-bit modulus, so packing is lossless.
+#[cfg(feature = "poseidon")]
+const POSEIDON_FIELD_CHUNK: usize = 31;
 
 /// Reserved leaf prefix for a future Rescue binding (not hashed yet).
 #[cfg(feature = "rescue")]
@@ -52,7 +66,7 @@ pub enum HashAlgorithm {
     /// Domain-separated BLAKE3 (`blake3` feature), see [`blake3_hash_leaf`].
     #[cfg(feature = "blake3")]
     Blake3,
-    /// Poseidon placeholder; enable the `poseidon` feature to name it.
+    /// Circom-compatible Poseidon over BN254; enable the `poseidon` feature.
     #[cfg(feature = "poseidon")]
     Poseidon,
     /// Rescue placeholder; enable the `rescue` feature to name it.
@@ -160,7 +174,7 @@ pub fn hash_leaf_with(
         #[cfg(feature = "blake3")]
         HashAlgorithm::Blake3 => Ok(blake3_hash_leaf(data)),
         #[cfg(feature = "poseidon")]
-        HashAlgorithm::Poseidon => poseidon_hash_leaf(data),
+        HashAlgorithm::Poseidon => Ok(poseidon_hash_leaf(data)),
         #[cfg(feature = "rescue")]
         HashAlgorithm::Rescue => rescue_hash_leaf(data),
     }
@@ -177,7 +191,7 @@ pub fn hash_nodes_with(
         #[cfg(feature = "blake3")]
         HashAlgorithm::Blake3 => Ok(blake3_hash_nodes(left, right)),
         #[cfg(feature = "poseidon")]
-        HashAlgorithm::Poseidon => poseidon_hash_nodes(left, right),
+        HashAlgorithm::Poseidon => Ok(poseidon_hash_nodes(left, right)),
         #[cfg(feature = "rescue")]
         HashAlgorithm::Rescue => rescue_hash_nodes(left, right),
     }
@@ -206,22 +220,71 @@ pub fn blake3_hash_nodes(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
     hasher.finalize().into()
 }
 
-/// Poseidon leaf hash placeholder. Always returns [`HashNotImplemented`].
-///
-/// A later binding will absorb `data` as field elements and use
-/// [`POSEIDON_LEAF_PREFIX`] so leaves stay distinct from parent nodes.
+/// Two-to-one circom Poseidon with `domain` in the capacity slot.
 #[cfg(feature = "poseidon")]
-pub fn poseidon_hash_leaf(_data: &[u8]) -> Result<[u8; 32], HashNotImplemented> {
-    Err(HashNotImplemented::new(HashAlgorithm::Poseidon.name()))
+fn poseidon2(domain: Fr, left: Fr, right: Fr) -> Fr {
+    let mut hasher = match Poseidon::<Fr>::with_domain_tag_circom(2, domain) {
+        Ok(hasher) => hasher,
+        Err(_) => unreachable!("circom Poseidon width 2 is in the published parameter set"),
+    };
+    match hasher.hash(&[left, right]) {
+        Ok(digest) => digest,
+        Err(_) => unreachable!("two inputs match width 2"),
+    }
 }
 
-/// Poseidon parent-node hash placeholder. Always returns [`HashNotImplemented`].
+/// Encode a field element as 32 big-endian bytes.
 #[cfg(feature = "poseidon")]
-pub fn poseidon_hash_nodes(
-    _left: &[u8; 32],
-    _right: &[u8; 32],
-) -> Result<[u8; 32], HashNotImplemented> {
-    Err(HashNotImplemented::new(HashAlgorithm::Poseidon.name()))
+fn poseidon_field_to_bytes(element: Fr) -> [u8; 32] {
+    let bytes = element.into_bigint().to_bytes_be();
+    let mut out = [0u8; 32];
+    debug_assert!(bytes.len() <= 32);
+    let start = 32 - bytes.len();
+    out[start..].copy_from_slice(&bytes);
+    out
+}
+
+/// Pack at most [`POSEIDON_FIELD_CHUNK`] bytes as a big-endian field element.
+#[cfg(feature = "poseidon")]
+fn poseidon_chunk_to_field(chunk: &[u8]) -> Fr {
+    debug_assert!(!chunk.is_empty());
+    debug_assert!(chunk.len() <= POSEIDON_FIELD_CHUNK);
+    let mut buf = [0u8; 32];
+    buf[32 - chunk.len()..].copy_from_slice(chunk);
+    Fr::from_be_bytes_mod_order(&buf)
+}
+
+/// Poseidon leaf hash: absorb `len` then 31-byte chunks under the leaf domain.
+///
+/// Empty input still mixes length with a zero chunk so it does not collide
+/// with a missing absorption. The permutation is circom-compatible Poseidon
+/// over BN254 (`light-poseidon-nostd`).
+#[cfg(feature = "poseidon")]
+pub fn poseidon_hash_leaf(data: &[u8]) -> [u8; 32] {
+    let domain = Fr::from(u64::from(POSEIDON_LEAF_PREFIX));
+    let mut acc = Fr::from(data.len() as u64);
+    if data.is_empty() {
+        return poseidon_field_to_bytes(poseidon2(domain, acc, Fr::from(0u64)));
+    }
+    let mut offset = 0;
+    while offset < data.len() {
+        let end = core::cmp::min(offset + POSEIDON_FIELD_CHUNK, data.len());
+        acc = poseidon2(domain, acc, poseidon_chunk_to_field(&data[offset..end]));
+        offset = end;
+    }
+    poseidon_field_to_bytes(acc)
+}
+
+/// Poseidon parent hash of two 32-byte children under the node domain tag.
+///
+/// Each child is reduced into a BN254 field element (Poseidon outputs already
+/// sit below the modulus, so this round-trips for hashes this function produces).
+#[cfg(feature = "poseidon")]
+pub fn poseidon_hash_nodes(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
+    let domain = Fr::from(u64::from(POSEIDON_NODE_PREFIX));
+    let left_f = Fr::from_be_bytes_mod_order(left);
+    let right_f = Fr::from_be_bytes_mod_order(right);
+    poseidon_field_to_bytes(poseidon2(domain, left_f, right_f))
 }
 
 /// Rescue leaf hash placeholder. Always returns [`HashNotImplemented`].
@@ -311,10 +374,16 @@ pub fn to_hex32(bytes: &[u8; 32]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "poseidon")]
+    use super::{poseidon2, poseidon_chunk_to_field, poseidon_field_to_bytes};
     #[cfg(all(feature = "blake3", not(feature = "std")))]
     use alloc::vec;
     #[cfg(not(feature = "std"))]
     use alloc::{format, string::ToString, vec::Vec};
+    #[cfg(feature = "poseidon")]
+    use ark_bn254::Fr;
+    #[cfg(feature = "poseidon")]
+    use ark_ff::PrimeField;
 
     /// SHA-256(0x00 || "") — stable test vector for the empty leaf.
     const EMPTY_LEAF_HEX: &str = "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d";
@@ -444,24 +513,72 @@ mod tests {
 
     #[cfg(feature = "poseidon")]
     #[test]
-    fn poseidon_stubs_return_not_implemented() {
-        let err = poseidon_hash_leaf(b"abc").expect_err("stub");
-        assert_eq!(err.algorithm, "poseidon");
-        assert_eq!(err.to_string(), "poseidon hashing is not implemented yet");
-        assert_eq!(
-            poseidon_hash_nodes(&[1u8; 32], &[2u8; 32]).expect_err("stub"),
-            err
-        );
-        assert_eq!(
-            hash_leaf_with(HashAlgorithm::Poseidon, b"abc").expect_err("stub"),
-            err
-        );
-        assert_eq!(
-            hash_nodes_with(HashAlgorithm::Poseidon, &[1u8; 32], &[2u8; 32]).expect_err("stub"),
-            err
-        );
+    fn poseidon_hashes_are_deterministic_ordered_and_domain_separated() {
         assert_eq!(HashAlgorithm::Poseidon.name(), "poseidon");
         assert_eq!(HashAlgorithm::Poseidon.to_string(), "poseidon");
+        assert_eq!(poseidon_hash_leaf(b"abc"), poseidon_hash_leaf(b"abc"));
+        assert_ne!(poseidon_hash_leaf(b"abc"), poseidon_hash_leaf(b"abd"));
+        assert_ne!(poseidon_hash_leaf(b"abc"), hash_leaf(b"abc"));
+        assert_eq!(
+            hash_leaf_with(HashAlgorithm::Poseidon, b"abc").expect("poseidon"),
+            poseidon_hash_leaf(b"abc")
+        );
+
+        let left = poseidon_hash_leaf(b"a");
+        let right = poseidon_hash_leaf(b"b");
+        assert_ne!(
+            poseidon_hash_nodes(&left, &right),
+            poseidon_hash_nodes(&right, &left)
+        );
+        assert_eq!(
+            hash_nodes_with(HashAlgorithm::Poseidon, &left, &right).expect("poseidon"),
+            poseidon_hash_nodes(&left, &right)
+        );
+
+        // Same 32-byte payload must not hash the same as a leaf and as a node.
+        let payload = [0x22u8; 32];
+        assert_ne!(
+            poseidon_hash_leaf(&payload),
+            poseidon_hash_nodes(&payload, &payload)
+        );
+        assert_ne!(poseidon_hash_leaf(b""), poseidon_hash_leaf(&[0u8]));
+    }
+
+    #[cfg(feature = "poseidon")]
+    #[test]
+    fn poseidon_leaf_matches_manual_length_and_chunk_fold() {
+        let data = b"abcdefghijklmnopqrstuvwxyz0123456789";
+        assert!(data.len() > POSEIDON_FIELD_CHUNK);
+        let domain = Fr::from(u64::from(POSEIDON_LEAF_PREFIX));
+        let mut acc = Fr::from(data.len() as u64);
+        let mut offset = 0;
+        while offset < data.len() {
+            let end = core::cmp::min(offset + POSEIDON_FIELD_CHUNK, data.len());
+            acc = poseidon2(domain, acc, poseidon_chunk_to_field(&data[offset..end]));
+            offset = end;
+        }
+        assert_eq!(poseidon_hash_leaf(data), poseidon_field_to_bytes(acc));
+    }
+
+    #[cfg(feature = "poseidon")]
+    #[test]
+    fn poseidon_nodes_match_direct_permutation_call() {
+        let left = poseidon_hash_leaf(b"left");
+        let right = poseidon_hash_leaf(b"right");
+        let domain = Fr::from(u64::from(POSEIDON_NODE_PREFIX));
+        let expected = poseidon2(
+            domain,
+            Fr::from_be_bytes_mod_order(&left),
+            Fr::from_be_bytes_mod_order(&right),
+        );
+        assert_eq!(
+            poseidon_hash_nodes(&left, &right),
+            poseidon_field_to_bytes(expected)
+        );
+        assert_eq!(
+            Fr::from_be_bytes_mod_order(&poseidon_hash_nodes(&left, &right)),
+            expected
+        );
     }
 
     #[cfg(feature = "rescue")]
