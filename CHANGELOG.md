@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-12 (security notes)
+
+- Add `commit_root` and `MerkleTree::committed_root` so a root is bound to its leaf count, which removes the duplicate-last padding ambiguity
+- Add `verify_committed`, which also checks the index, path length, and step sides
+- New security chapter in the book and attack tests for second preimages, padding, and moved proofs
+
 ## 2026-11-12
 
 - Compact multiproofs store shared siblings once and still reconstruct the same root

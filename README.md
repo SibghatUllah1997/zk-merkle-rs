@@ -26,6 +26,7 @@ Fast, tiny, no_std-friendly SHA-256 Merkle tree with inclusion proofs and a clea
 - Chunking: split buffers or `Read` streams into fixed-size leaves (`chunk_bytes`, `chunk_reader`)
 - Append-only log: `MerkleLog` records a root checkpoint after each append or batch
 - Contiguous layout: all hashes sit in one buffer; `hash_count`, `storage_bytes`, and `layer_hashes` expose it
+- Security: `committed_root` binds a root to its leaf count, and `verify_committed` checks index, depth, and sides; see `book/security.md`
 - Book: `mdbook build` / `mdbook serve` from the repo root (source in `book/`)
 - Clear domain separation:
   - Leaf hash: H(0x00 || data)

@@ -29,7 +29,7 @@ This project will evolve from a simple educational Merkle tree to a more feature
 25. Optimize proof generation by caching parent indices [x]
 26. Add multiproof format and verifier [x]
 27. Add zk-friendly hash implementation (Poseidon) via audited crate [x]
-28. Add preimage resistance considerations and security notes
+28. Add preimage resistance considerations and security notes [x]
 29. Add advanced docs: tree variants, padding, and domains
 30. 1.0 polish pass: docs, examples, benches, feature flags, release
 

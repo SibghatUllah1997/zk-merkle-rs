@@ -36,6 +36,8 @@
 //! - Internal node hash: H(0x01 || left || right)
 //! - Odd layers are padded by duplicating the last element (except a single-leaf
 //!   tree, whose root is exactly the leaf hash)
+//! - [`MerkleTree::committed_root`] binds the root to the leaf count, so a
+//!   duplicated last leaf cannot pass as a different tree
 //! - Hash function: sha2::Sha256 (audited crate; no hand-rolled crypto)
 //! - Multiproofs are a list of independent paths; [`CompactMultiProof`]
 //!   stores overlapping siblings once

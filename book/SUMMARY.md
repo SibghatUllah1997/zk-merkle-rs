@@ -5,3 +5,4 @@
 - [Building a tree](tree.md)
 - [Inclusion proofs](proofs.md)
 - [Memory layout](layout.md)
+- [Security notes](security.md)
