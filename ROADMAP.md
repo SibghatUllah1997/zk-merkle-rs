@@ -27,8 +27,8 @@ This project will evolve from a simple educational Merkle tree to a more feature
 23. Add example: simple append-only log with roots [x]
 24. Optimize memory layout for large trees [x]
 25. Optimize proof generation by caching parent indices [x]
-26. Add multiproof format and verifier
-27. Add zk-friendly hash implementation (Poseidon) via audited crate
+26. Add multiproof format and verifier [x]
+27. Add zk-friendly hash implementation (Poseidon) via audited crate [x]
 28. Add preimage resistance considerations and security notes
 29. Add advanced docs: tree variants, padding, and domains
 30. 1.0 polish pass: docs, examples, benches, feature flags, release

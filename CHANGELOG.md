@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-12
+
+- Compact multiproofs store shared siblings once and still reconstruct the same root
+- Poseidon is a real hash behind the `poseidon` feature: leaves, nodes, trees, and proofs
+- Rescue stays a stub; SHA-256 remains the default
+
 ## 2026-11-11 (proof cache)
 
 - Add `ProofIndexCache`: parent and sibling positions precomputed once per tree, so each proof is a walk of table lookups

@@ -17,11 +17,12 @@ Fast, tiny, no_std-friendly SHA-256 Merkle tree with inclusion proofs and a clea
 ### Features
 - Proofs: generate and verify inclusion proofs
 - Indexed proofs: carry original leaf index alongside the proof
-- Multiproofs: naive bundle of independent per-leaf paths (no sibling sharing yet)
+- Multiproofs: naive bundle of independent per-leaf paths, plus compact proofs that store shared siblings once (`prove_compact`)
 - serde support: optional `serde` derive on proof/root types
 - no_std: works without `std` (uses `alloc`) via feature flags
 - BLAKE3: the `blake3` feature adds `BLAKE3(0x00 || data)` / `BLAKE3(0x01 || l || r)` trees via `MerkleTree::try_from_leaves_with(HashAlgorithm::Blake3, ..)` and `verify_with`
-- Hash placeholders: `poseidon` and `rescue` features expose stubs that return `HashNotImplemented`
+- Poseidon: the `poseidon` feature hashes with circom-compatible BN254 Poseidon (`0x10`/`0x11` domain tags) via `try_from_leaves_with(HashAlgorithm::Poseidon, ..)`
+- Hash placeholder: the `rescue` feature still returns `HashNotImplemented`
 - Chunking: split buffers or `Read` streams into fixed-size leaves (`chunk_bytes`, `chunk_reader`)
 - Append-only log: `MerkleLog` records a root checkpoint after each append or batch
 - Contiguous layout: all hashes sit in one buffer; `hash_count`, `storage_bytes`, and `layer_hashes` expose it
@@ -89,6 +90,10 @@ assert!(verify_inclusion(b"c", &proof.steps, root));
 // Naive multiproof: independent paths, no sibling sharing
 let multi = tree.prove_many([0, 2]).expect("in range");
 assert!(multi.verify(root));
+
+// Compact multiproof: overlapping siblings stored once
+let compact = tree.prove_compact([0, 2]).expect("in range");
+assert!(compact.verify(root));
 ```
 
 ### Benchmarks (micro, one-shot)
@@ -120,7 +125,8 @@ graph TD
 - Fuzzing (nightly): see `fuzz/README.md` (`cargo +nightly fuzz run tree_prove`)
 - no_std surface: `cargo test --no-default-features` and `cargo test --no-default-features --features serde`
 - Bare-metal no_std check: `rustup target add thumbv7em-none-eabihf`, then `cargo build --lib --target thumbv7em-none-eabihf --no-default-features`; the `ci/no-std-smoke` crate builds the same way and runs its checks on the host with `cargo test`
-- Hash stubs: `cargo test --features poseidon,rescue` (functions return `HashNotImplemented`)
+- Poseidon: `cargo test --features poseidon` and `cargo test --no-default-features --features poseidon`
+- Rescue stub: `cargo test --features rescue` (functions return `HashNotImplemented`)
 - BLAKE3: `cargo test --features blake3` and `cargo test --no-default-features --features blake3`
 - Format and lints: `cargo fmt --all --check` and `cargo clippy --all-targets --all-features -D warnings`
 - Docs: `cargo doc --no-deps` for the API, `mdbook build` for the longer-form book (`book/`)

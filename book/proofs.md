@@ -29,12 +29,38 @@ comma-separated. That is the form the `merkle` CLI `verify` command accepts.
 ## Multiproofs
 
 `prove_many` and `prove_all` bundle independent per-leaf paths. Overlapping
-siblings are repeated; the type does not compress shared nodes yet. Verify
-with `MultiProof::verify` or `verify_inclusion_many` when you also want to
-check the original leaf bytes against each entry, in the same order.
+siblings are repeated. Verify with `MultiProof::verify` or
+`verify_inclusion_many` when you also want to check the original leaf bytes
+against each entry, in the same order.
 
 An empty bundle is vacuously true for any root. That matches "no claims were
 made", not "the tree is empty".
+
+## Compact multiproofs
+
+`prove_compact` and `prove_compact_all` store each shared sibling once.
+Indices are sorted and de-duplicated. The proof also records `leaf_count` so
+the verifier can apply the same duplicate-last padding the tree used.
+
+```rust,ignore
+use merkle_tree::{verify_inclusion_compact, MerkleTree};
+
+let tree = MerkleTree::from_leaves(["a", "b", "c", "d"]);
+let root = tree.root().expect("root");
+let compact = tree.prove_compact([0, 1]).expect("in range");
+
+assert_eq!(compact.sibling_count(), 1);
+assert!(compact.verify(root));
+assert!(verify_inclusion_compact(
+    [(0usize, b"a".as_ref()), (1, b"b".as_ref())],
+    &compact,
+    root
+));
+```
+
+Proving every leaf yields an empty sibling list: the claimed leaves already
+determine every parent. `verify_inclusion_compact` matches by index, so the
+caller can pass pairs in any order.
 
 ## Many proofs from one tree
 

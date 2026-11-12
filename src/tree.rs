@@ -90,9 +90,9 @@ impl core::fmt::Display for MerkleRoot {
 
 /// A Merkle tree with explicit domain separation.
 ///
-/// SHA-256 is the default. With the `blake3` feature, trees can also be built
-/// over BLAKE3 via [`MerkleTree::try_from_leaves_with`]; the chosen algorithm
-/// is remembered so appends keep hashing the same way.
+/// SHA-256 is the default. With the `blake3` or `poseidon` features, trees can
+/// also be built over those hashes via [`MerkleTree::try_from_leaves_with`];
+/// the chosen algorithm is remembered so appends keep hashing the same way.
 ///
 /// Hashes are stored leaf-to-root in a single `Vec`. `layer_offsets[i]` is the
 /// start of layer `i` in that buffer; the last offset is the buffer length.

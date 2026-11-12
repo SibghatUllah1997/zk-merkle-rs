@@ -39,13 +39,14 @@
 //! - Hash function: sha2::Sha256 (audited crate; no hand-rolled crypto)
 //! - Multiproofs are a list of independent paths; [`CompactMultiProof`]
 //!   stores overlapping siblings once
-//! - Poseidon and Rescue names exist behind feature flags but do not hash yet
+//! - Poseidon (feature `poseidon`) is circom-compatible BN254 hashing; Rescue
+//!   is still a placeholder
 //! - Hashes are stored leaf-to-root in one buffer; see [`MerkleTree::hash_count`]
 //!
 //! Layout:
-//! - [`hashing`] — domain-separated SHA-256, hex helpers, and hash placeholders
+//! - [`hashing`] — domain-separated SHA-256, BLAKE3, Poseidon, and hex helpers
 //! - [`error`] — length, hex, proof-step, and placeholder-hash errors
-//! - [`proof`] — inclusion proofs, naive multiproofs, and verification
+//! - [`proof`] — inclusion proofs, naive and compact multiproofs, verification
 //! - [`tree`] — [`MerkleTree`], [`MerkleRoot`], and a contiguous hash buffer
 //! - [`cache`] — [`ProofIndexCache`] for many proofs from one tree
 //! - [`chunk`] — split byte buffers into fixed-size leaves

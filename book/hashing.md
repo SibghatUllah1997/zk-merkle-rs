@@ -1,9 +1,9 @@
 # Hashing and domain separation
 
 Every digest this crate stores is 32 bytes. SHA-256 is always available.
-BLAKE3 is optional behind the `blake3` feature. Poseidon and Rescue names
-exist as feature-gated placeholders and return `HashNotImplemented` until a
-real binding lands.
+BLAKE3 is optional behind the `blake3` feature. Poseidon is optional behind
+the `poseidon` feature (circom-compatible BN254, x^5 S-box). Rescue remains
+a placeholder that returns `HashNotImplemented`.
 
 ## Prefixes
 
@@ -23,8 +23,8 @@ The crate therefore prepends a one-byte domain:
 bytes (`1 + 32 + 32`). A leaf can be any length, including empty.
 
 The constants are `LEAF_PREFIX` (`0x00`) and `NODE_PREFIX` (`0x01`). Poseidon
-and Rescue reserve `0x10`/`0x11` and `0x20`/`0x21` so a later binding does not
-reuse the SHA-256 tags.
+uses `0x10`/`0x11` as capacity-slot domain tags, not as byte prefixes in front
+of SHA-256-style input. Rescue still reserves `0x20`/`0x21`.
 
 ## Choosing an algorithm
 
@@ -42,8 +42,13 @@ assert!(proof.verify_with(HashAlgorithm::Blake3, root)?);
 ```
 
 The tree remembers the algorithm, so `append` keeps hashing the same way.
-A BLAKE3 proof will not verify as SHA-256, and the reverse is also true:
-the prefix scheme is shared, but the digest function is not.
+A BLAKE3 or Poseidon proof will not verify as SHA-256, and the reverse is
+also true: the digest function differs, and Poseidon uses its own domain tags.
+
+Poseidon leaves absorb the byte length and then 31-byte chunks so arbitrary
+preimages fit in BN254 field elements. Parent hashes mix the two child
+digests under the node domain tag. Build a tree with
+`MerkleTree::try_from_leaves_with(HashAlgorithm::Poseidon, leaves)`.
 
 ## What the prefixes do not do
 
