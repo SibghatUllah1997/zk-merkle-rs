@@ -14,7 +14,7 @@ use alloc::{string::String, vec::Vec};
 
 use crate::error::HashNotImplemented;
 use crate::error::ParseStepsError;
-use crate::hashing::{to_hex32, try_from_hex32, HashAlgorithm, TreeHasher};
+use crate::hashing::{commit_root, to_hex32, try_from_hex32, HashAlgorithm, TreeHasher};
 
 /// Direction of a sibling node in a proof step.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -91,6 +91,25 @@ pub fn parse_proof_steps(spec: &str) -> Result<Vec<ProofStep>, ParseStepsError> 
         steps.push(ProofStep::parse(token)?);
     }
     Ok(steps)
+}
+
+/// Number of steps in every inclusion proof for a tree of `leaf_count`
+/// leaves: `ceil(log2(leaf_count))`, and zero for zero or one leaf.
+///
+/// ```
+/// use merkle_tree::proof_depth;
+///
+/// assert_eq!(proof_depth(1), 0);
+/// assert_eq!(proof_depth(2), 1);
+/// assert_eq!(proof_depth(5), 3);
+/// assert_eq!(proof_depth(8), 3);
+/// ```
+pub const fn proof_depth(leaf_count: usize) -> usize {
+    if leaf_count <= 1 {
+        0
+    } else {
+        (usize::BITS - (leaf_count - 1).leading_zeros()) as usize
+    }
 }
 
 /// Inclusion proof for a specific leaf.
@@ -195,6 +214,67 @@ impl IndexedInclusionProof {
         expected_root: [u8; 32],
     ) -> Result<bool, HashNotImplemented> {
         self.proof.verify_with(algorithm, expected_root)
+    }
+
+    /// Strictly verify this SHA-256 proof against a [`commit_root`]
+    /// commitment for a tree of `leaf_count` leaves.
+    ///
+    /// On top of rebuilding the root, this checks that `index < leaf_count`,
+    /// that the proof has exactly [`proof_depth`] steps, and that every
+    /// step's side matches the bits of `index`. A proof for the right leaf
+    /// therefore cannot be replayed at another position or with a padded
+    /// copy of the last leaf.
+    ///
+    /// ```
+    /// use merkle_tree::MerkleTree;
+    ///
+    /// let tree = MerkleTree::from_leaves(["a", "b", "c"]);
+    /// let commitment = tree.committed_root().expect("root");
+    /// let proof = tree.prove_indexed(2).expect("proof");
+    /// assert!(proof.verify_committed(commitment, 3));
+    /// assert!(!proof.verify_committed(commitment, 4));
+    /// ```
+    pub fn verify_committed(&self, commitment: [u8; 32], leaf_count: usize) -> bool {
+        self.verify_committed_inner(TreeHasher::Sha256, commitment, leaf_count)
+    }
+
+    /// Like [`Self::verify_committed`], hashing the path with `algorithm`.
+    pub fn verify_committed_with(
+        &self,
+        algorithm: HashAlgorithm,
+        commitment: [u8; 32],
+        leaf_count: usize,
+    ) -> Result<bool, HashNotImplemented> {
+        Ok(self.verify_committed_inner(TreeHasher::new(algorithm)?, commitment, leaf_count))
+    }
+
+    fn verify_committed_inner(
+        &self,
+        hasher: TreeHasher,
+        commitment: [u8; 32],
+        leaf_count: usize,
+    ) -> bool {
+        if self.index >= leaf_count || self.proof.steps.len() != proof_depth(leaf_count) {
+            return false;
+        }
+        let mut idx = self.index;
+        let mut acc = self.proof.leaf_hash;
+        for step in &self.proof.steps {
+            let expected_side = if idx % 2 == 1 {
+                SiblingSide::Left
+            } else {
+                SiblingSide::Right
+            };
+            if step.side != expected_side {
+                return false;
+            }
+            acc = match step.side {
+                SiblingSide::Left => hasher.nodes(&step.sibling, &acc),
+                SiblingSide::Right => hasher.nodes(&acc, &step.sibling),
+            };
+            idx /= 2;
+        }
+        commit_root(&acc, leaf_count as u64) == commitment
     }
 
     /// Leaf hash as lowercase hex.

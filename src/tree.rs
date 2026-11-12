@@ -14,7 +14,7 @@ use alloc::{string::String, vec::Vec};
 
 use crate::cache::ProofIndexCache;
 use crate::error::{try_array32, HashNotImplemented, HexError, LengthError};
-use crate::hashing::{to_hex32, try_from_hex32, HashAlgorithm, TreeHasher};
+use crate::hashing::{commit_root, to_hex32, try_from_hex32, HashAlgorithm, TreeHasher};
 use crate::proof::{
     classify_compact_sibling, unique_sorted_indices, CompactMultiProof, CompactSibling,
     InclusionProof, IndexedInclusionProof, MultiProof, ProofStep, SiblingSide,
@@ -376,6 +376,16 @@ impl MerkleTree {
     /// Root hash wrapped in `MerkleRoot`. Returns None for an empty tree.
     pub fn root_typed(&self) -> Option<MerkleRoot> {
         self.root().map(MerkleRoot)
+    }
+
+    /// Root bound to this tree's leaf count via [`commit_root`]. Returns
+    /// None for an empty tree.
+    ///
+    /// Publish this instead of [`Self::root`] when verifiers should not
+    /// accept a tree that differs only by a duplicated last leaf.
+    pub fn committed_root(&self) -> Option<[u8; 32]> {
+        self.root()
+            .map(|root| commit_root(&root, self.leaf_count() as u64))
     }
 
     /// Root hash formatted as lowercase hex. Returns None for an empty tree.

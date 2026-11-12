@@ -98,7 +98,7 @@ pub use hashing::{
 pub use hashing::{rescue_hash_leaf, rescue_hash_nodes, RESCUE_LEAF_PREFIX, RESCUE_NODE_PREFIX};
 pub use log::{LogCheckpoint, MerkleLog};
 pub use proof::{
-    parse_proof_steps, verify_compact, verify_inclusion, verify_inclusion_compact,
+    parse_proof_steps, proof_depth, verify_compact, verify_inclusion, verify_inclusion_compact,
     verify_inclusion_compact_with, verify_inclusion_many, verify_inclusion_many_with,
     verify_inclusion_with, verify_multiproof, CompactMultiProof, InclusionProof,
     IndexedInclusionProof, MultiProof, ProofStep, SiblingSide,
