@@ -87,8 +87,8 @@ pub use error::{try_array32, HashNotImplemented, HexError, LengthError, ParseSte
 #[cfg(feature = "blake3")]
 pub use hashing::{blake3_hash_leaf, blake3_hash_nodes};
 pub use hashing::{
-    from_hex, hash_leaf, hash_leaf_with, hash_nodes, hash_nodes_with, to_hex, to_hex32,
-    try_from_hex32, HashAlgorithm, LEAF_PREFIX, NODE_PREFIX,
+    commit_root, from_hex, hash_leaf, hash_leaf_with, hash_nodes, hash_nodes_with, to_hex,
+    to_hex32, try_from_hex32, HashAlgorithm, LEAF_PREFIX, NODE_PREFIX, ROOT_COMMIT_PREFIX,
 };
 #[cfg(feature = "poseidon")]
 pub use hashing::{

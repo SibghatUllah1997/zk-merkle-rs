@@ -36,6 +36,10 @@ pub const LEAF_PREFIX: u8 = 0x00;
 /// Domain-separation prefix prepended to concatenated child hashes.
 pub const NODE_PREFIX: u8 = 0x01;
 
+/// Domain-separation prefix for a root bound to its leaf count, see
+/// [`commit_root`].
+pub const ROOT_COMMIT_PREFIX: u8 = 0x02;
+
 /// Domain tag mixed into Poseidon leaf hashes (`0x10`).
 #[cfg(feature = "poseidon")]
 pub const POSEIDON_LEAF_PREFIX: u8 = 0x10;
@@ -109,6 +113,32 @@ pub fn hash_nodes(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
     hasher.update([NODE_PREFIX]);
     hasher.update(left);
     hasher.update(right);
+    hasher.finalize().into()
+}
+
+/// Bind a Merkle root to the number of leaves it was built from:
+/// `SHA-256(0x02 || leaf_count as u64 big-endian || root)`.
+///
+/// Duplicate-last padding means `[a, b, c]` and `[a, b, c, c]` share a plain
+/// root. Publishing this commitment instead removes that ambiguity, because a
+/// verifier must also agree on `leaf_count`. The commitment is always SHA-256,
+/// whatever algorithm built the tree: the root already differs per algorithm,
+/// and this final wrap happens outside any circuit.
+///
+/// ```
+/// use merkle_tree::{commit_root, MerkleTree};
+///
+/// let three = MerkleTree::from_leaves(["a", "b", "c"]);
+/// let four = MerkleTree::from_leaves(["a", "b", "c", "c"]);
+/// assert_eq!(three.root(), four.root());
+/// let root = three.root().expect("root");
+/// assert_ne!(commit_root(&root, 3), commit_root(&root, 4));
+/// ```
+pub fn commit_root(root: &[u8; 32], leaf_count: u64) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update([ROOT_COMMIT_PREFIX]);
+    hasher.update(leaf_count.to_be_bytes());
+    hasher.update(root);
     hasher.finalize().into()
 }
 
@@ -411,6 +441,9 @@ mod tests {
         assert_eq!(LEAF_PREFIX, 0x00);
         assert_eq!(NODE_PREFIX, 0x01);
         assert_ne!(LEAF_PREFIX, NODE_PREFIX);
+        assert_eq!(ROOT_COMMIT_PREFIX, 0x02);
+        assert_ne!(ROOT_COMMIT_PREFIX, LEAF_PREFIX);
+        assert_ne!(ROOT_COMMIT_PREFIX, NODE_PREFIX);
         #[cfg(feature = "poseidon")]
         {
             assert_eq!(POSEIDON_LEAF_PREFIX, 0x10);
@@ -615,6 +648,21 @@ mod tests {
         assert_eq!(HashAlgorithm::Rescue.name(), "rescue");
         assert_eq!(HashAlgorithm::Rescue.to_string(), "rescue");
         assert_ne!(err, HashNotImplemented::new("poseidon"));
+    }
+
+    #[test]
+    fn commit_root_matches_manual_layout_and_binds_count() {
+        let root = hash_nodes(&hash_leaf(b"a"), &hash_leaf(b"b"));
+        let mut hasher = Sha256::new();
+        hasher.update([ROOT_COMMIT_PREFIX]);
+        hasher.update(2u64.to_be_bytes());
+        hasher.update(root);
+        let expected: [u8; 32] = hasher.finalize().into();
+        assert_eq!(commit_root(&root, 2), expected);
+        assert_ne!(commit_root(&root, 2), commit_root(&root, 3));
+        assert_ne!(commit_root(&root, 2), root);
+        // A commitment is not a valid node hash over the same bytes.
+        assert_ne!(commit_root(&root, 2), hash_nodes(&root, &root));
     }
 
     #[test]
