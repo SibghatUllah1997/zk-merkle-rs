@@ -143,8 +143,7 @@ impl MerkleTree {
     /// Build a tree from raw leaf data using `algorithm`.
     ///
     /// Fails with [`HashNotImplemented`] for placeholder algorithms such as
-    /// Poseidon or Rescue. With [`HashAlgorithm::Sha256`] this equals
-    /// [`Self::from_leaves`].
+    /// Rescue. With [`HashAlgorithm::Sha256`] this equals [`Self::from_leaves`].
     ///
     /// ```
     /// use merkle_tree::{HashAlgorithm, MerkleTree};
@@ -1073,14 +1072,42 @@ mod tests {
         assert_eq!(hashed.root(), tree.root());
     }
 
-    #[cfg(feature = "poseidon")]
+    #[cfg(feature = "rescue")]
     #[test]
     fn placeholder_algorithms_cannot_build_trees() {
-        let err =
-            MerkleTree::try_from_leaves_with(HashAlgorithm::Poseidon, ["a"]).expect_err("stub");
-        assert_eq!(err, HashNotImplemented::new("poseidon"));
+        let err = MerkleTree::try_from_leaves_with(HashAlgorithm::Rescue, ["a"]).expect_err("stub");
+        assert_eq!(err, HashNotImplemented::new("rescue"));
         let empty: [[u8; 32]; 0] = [];
-        assert!(MerkleTree::try_from_hashed_leaves_with(HashAlgorithm::Poseidon, empty).is_err());
+        assert!(MerkleTree::try_from_hashed_leaves_with(HashAlgorithm::Rescue, empty).is_err());
+    }
+
+    #[cfg(feature = "poseidon")]
+    #[test]
+    fn poseidon_tree_keeps_its_algorithm_across_appends() {
+        let mut tree =
+            MerkleTree::try_from_leaves_with(HashAlgorithm::Poseidon, ["a"]).expect("poseidon");
+        assert_eq!(tree.root(), Some(crate::hashing::poseidon_hash_leaf(b"a")));
+        tree.append("b");
+        let expected = crate::hashing::poseidon_hash_nodes(
+            &crate::hashing::poseidon_hash_leaf(b"a"),
+            &crate::hashing::poseidon_hash_leaf(b"b"),
+        );
+        assert_eq!(tree.root(), Some(expected));
+        tree.extend(["c", "d", "e"]);
+        let rebuilt =
+            MerkleTree::try_from_leaves_with(HashAlgorithm::Poseidon, ["a", "b", "c", "d", "e"])
+                .expect("poseidon");
+        assert_eq!(tree.root(), rebuilt.root());
+        assert_eq!(tree.algorithm(), HashAlgorithm::Poseidon);
+        assert_ne!(
+            tree.root(),
+            MerkleTree::from_leaves(["a", "b", "c", "d", "e"]).root()
+        );
+        let compact = tree.prove_compact([0, 4]).expect("in range");
+        assert_eq!(
+            compact.verify_with(HashAlgorithm::Poseidon, tree.root().unwrap()),
+            Ok(true)
+        );
     }
 
     #[cfg(feature = "blake3")]

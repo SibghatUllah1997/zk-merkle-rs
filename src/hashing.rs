@@ -122,6 +122,8 @@ pub(crate) enum TreeHasher {
     Sha256,
     #[cfg(feature = "blake3")]
     Blake3,
+    #[cfg(feature = "poseidon")]
+    Poseidon,
 }
 
 impl TreeHasher {
@@ -131,6 +133,8 @@ impl TreeHasher {
             HashAlgorithm::Sha256 => Ok(Self::Sha256),
             #[cfg(feature = "blake3")]
             HashAlgorithm::Blake3 => Ok(Self::Blake3),
+            #[cfg(feature = "poseidon")]
+            HashAlgorithm::Poseidon => Ok(Self::Poseidon),
             #[allow(unreachable_patterns)]
             other => Err(HashNotImplemented::new(other.name())),
         }
@@ -142,6 +146,8 @@ impl TreeHasher {
             Self::Sha256 => HashAlgorithm::Sha256,
             #[cfg(feature = "blake3")]
             Self::Blake3 => HashAlgorithm::Blake3,
+            #[cfg(feature = "poseidon")]
+            Self::Poseidon => HashAlgorithm::Poseidon,
         }
     }
 
@@ -151,6 +157,8 @@ impl TreeHasher {
             Self::Sha256 => hash_leaf(data),
             #[cfg(feature = "blake3")]
             Self::Blake3 => blake3_hash_leaf(data),
+            #[cfg(feature = "poseidon")]
+            Self::Poseidon => poseidon_hash_leaf(data),
         }
     }
 
@@ -160,6 +168,8 @@ impl TreeHasher {
             Self::Sha256 => hash_nodes(left, right),
             #[cfg(feature = "blake3")]
             Self::Blake3 => blake3_hash_nodes(left, right),
+            #[cfg(feature = "poseidon")]
+            Self::Poseidon => poseidon_hash_nodes(left, right),
         }
     }
 }
@@ -483,10 +493,13 @@ mod tests {
             assert_eq!(b3.nodes(&l, &r), blake3_hash_nodes(&l, &r));
         }
         #[cfg(feature = "poseidon")]
-        assert_eq!(
-            TreeHasher::new(HashAlgorithm::Poseidon),
-            Err(HashNotImplemented::new("poseidon"))
-        );
+        {
+            let poseidon = TreeHasher::new(HashAlgorithm::Poseidon).expect("poseidon");
+            assert_eq!(poseidon.algorithm(), HashAlgorithm::Poseidon);
+            assert_eq!(poseidon.leaf(b"abc"), poseidon_hash_leaf(b"abc"));
+            let (l, r) = (poseidon.leaf(b"a"), poseidon.leaf(b"b"));
+            assert_eq!(poseidon.nodes(&l, &r), poseidon_hash_nodes(&l, &r));
+        }
         #[cfg(feature = "rescue")]
         assert_eq!(
             TreeHasher::new(HashAlgorithm::Rescue),
