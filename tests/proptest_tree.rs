@@ -1,7 +1,8 @@
 //! Property tests for tree construction, leaf metadata, and inclusion proofs.
 
 use merkle_tree::{
-    hash_leaf, parse_proof_steps, verify_inclusion, verify_inclusion_many, MerkleRoot, MerkleTree,
+    hash_leaf, parse_proof_steps, verify_inclusion, verify_inclusion_compact,
+    verify_inclusion_many, MerkleRoot, MerkleTree,
 };
 use proptest::prelude::*;
 use proptest::test_runner::FileFailurePersistence;
@@ -157,6 +158,44 @@ proptest! {
         let all = tree.prove_all();
         prop_assert_eq!(all.len(), n);
         prop_assert!(all.verify(root));
+    }
+
+    #[test]
+    fn compact_multiproof_verifies_claimed_leaves(
+        leaves in nonempty_leaves(),
+        picks in prop::collection::vec(any::<u8>(), 1..=8)
+    ) {
+        let tree = MerkleTree::from_leaves(leaves.iter());
+        let root = tree.root().expect("non-empty");
+        let n = leaves.len();
+        let indices: Vec<usize> = picks.iter().map(|b| (*b as usize) % n).collect();
+        let compact = tree.prove_compact(indices.iter().copied()).expect("in range");
+
+        let mut unique = indices.clone();
+        unique.sort_unstable();
+        unique.dedup();
+        prop_assert_eq!(compact.indices(), unique.as_slice());
+        prop_assert_eq!(compact.leaf_count, n);
+        prop_assert!(compact.verify(root));
+
+        let pairs: Vec<(usize, &[u8])> = unique
+            .iter()
+            .map(|&i| (i, leaves[i].as_slice()))
+            .collect();
+        prop_assert!(verify_inclusion_compact(pairs, &compact, root));
+
+        let all = tree.prove_compact_all();
+        prop_assert!(all.siblings.is_empty());
+        prop_assert!(all.verify(root));
+
+        let naive_steps: usize = tree
+            .prove_many(unique.iter().copied())
+            .expect("in range")
+            .proofs
+            .iter()
+            .map(|p| p.proof.steps.len())
+            .sum();
+        prop_assert!(compact.sibling_count() <= naive_steps);
     }
 
     #[test]

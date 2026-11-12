@@ -375,6 +375,97 @@ impl CompactMultiProof {
     pub fn siblings_hex(&self) -> Vec<String> {
         self.siblings.iter().map(to_hex32).collect()
     }
+
+    /// `true` when indices are unique, sorted, in range, and match `leaves`.
+    fn structure_ok(&self) -> bool {
+        if self.indices.len() != self.leaves.len() {
+            return false;
+        }
+        for (i, &index) in self.indices.iter().enumerate() {
+            if index >= self.leaf_count {
+                return false;
+            }
+            if i > 0 && self.indices[i - 1] >= index {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Verify this SHA-256 compact proof against an expected root.
+    ///
+    /// An empty index list is treated as vacuously true for any root.
+    pub fn verify(&self, expected_root: [u8; 32]) -> bool {
+        self.verify_inner(TreeHasher::Sha256, expected_root)
+    }
+
+    /// Verify this compact proof against `expected_root` using `algorithm`.
+    pub fn verify_with(
+        &self,
+        algorithm: HashAlgorithm,
+        expected_root: [u8; 32],
+    ) -> Result<bool, HashNotImplemented> {
+        Ok(self.verify_inner(TreeHasher::new(algorithm)?, expected_root))
+    }
+
+    pub(crate) fn verify_inner(&self, hasher: TreeHasher, expected_root: [u8; 32]) -> bool {
+        if !self.structure_ok() {
+            return false;
+        }
+        if self.indices.is_empty() {
+            return true;
+        }
+
+        let mut known_idx = self.indices.clone();
+        let mut known_hash = self.leaves.clone();
+        let mut sib_pos = 0usize;
+        let mut layer_len = self.leaf_count;
+
+        while layer_len > 1 {
+            let mut parents_idx = Vec::with_capacity(known_idx.len());
+            let mut parents_hash = Vec::with_capacity(known_idx.len());
+            let mut i = 0;
+            while i < known_idx.len() {
+                let idx = known_idx[i];
+                if idx >= layer_len {
+                    return false;
+                }
+                let hash = known_hash[i];
+                let next = known_idx.get(i + 1).copied();
+                let parent_hash = match classify_compact_sibling(idx, next, layer_len) {
+                    CompactSibling::DuplicatePad => hasher.nodes(&hash, &hash),
+                    CompactSibling::KnownPair => {
+                        let right = known_hash[i + 1];
+                        i += 1;
+                        hasher.nodes(&hash, &right)
+                    }
+                    CompactSibling::External => {
+                        let Some(&sibling) = self.siblings.get(sib_pos) else {
+                            return false;
+                        };
+                        sib_pos += 1;
+                        if idx % 2 == 1 {
+                            hasher.nodes(&sibling, &hash)
+                        } else {
+                            hasher.nodes(&hash, &sibling)
+                        }
+                    }
+                };
+                let parent = idx / 2;
+                if parents_idx.last().copied() == Some(parent) {
+                    return false;
+                }
+                parents_idx.push(parent);
+                parents_hash.push(parent_hash);
+                i += 1;
+            }
+            known_idx = parents_idx;
+            known_hash = parents_hash;
+            layer_len = (layer_len + 1) / 2;
+        }
+
+        sib_pos == self.siblings.len() && known_hash.len() == 1 && known_hash[0] == expected_root
+    }
 }
 
 impl core::fmt::Display for CompactMultiProof {
@@ -399,6 +490,71 @@ impl core::fmt::Display for CompactMultiProof {
 /// Verify a naive multiproof against an expected root.
 pub fn verify_multiproof(proof: &MultiProof, expected_root: [u8; 32]) -> bool {
     proof.verify(expected_root)
+}
+
+/// Verify a compact multiproof against an expected root.
+pub fn verify_compact(proof: &CompactMultiProof, expected_root: [u8; 32]) -> bool {
+    proof.verify(expected_root)
+}
+
+/// Verify that each `(index, leaf_data)` pair hashes to the compact proof's
+/// claimed leaf and that the proof reconstructs `expected_root`.
+///
+/// Indices may arrive in any order. Duplicates, extras, missing leaves, or a
+/// hash mismatch all fail. An empty iterator matches an empty proof.
+pub fn verify_inclusion_compact<'a, I>(
+    leaves: I,
+    proof: &CompactMultiProof,
+    expected_root: [u8; 32],
+) -> bool
+where
+    I: IntoIterator<Item = (usize, &'a [u8])>,
+{
+    verify_inclusion_compact_inner(TreeHasher::Sha256, leaves, proof, expected_root)
+}
+
+/// Like [`verify_inclusion_compact`], but hashes leaves and nodes with `algorithm`.
+pub fn verify_inclusion_compact_with<'a, I>(
+    algorithm: HashAlgorithm,
+    leaves: I,
+    proof: &CompactMultiProof,
+    expected_root: [u8; 32],
+) -> Result<bool, HashNotImplemented>
+where
+    I: IntoIterator<Item = (usize, &'a [u8])>,
+{
+    let hasher = TreeHasher::new(algorithm)?;
+    Ok(verify_inclusion_compact_inner(
+        hasher,
+        leaves,
+        proof,
+        expected_root,
+    ))
+}
+
+fn verify_inclusion_compact_inner<'a, I>(
+    hasher: TreeHasher,
+    leaves: I,
+    proof: &CompactMultiProof,
+    expected_root: [u8; 32],
+) -> bool
+where
+    I: IntoIterator<Item = (usize, &'a [u8])>,
+{
+    let mut provided: Vec<(usize, [u8; 32])> = leaves
+        .into_iter()
+        .map(|(index, data)| (index, hasher.leaf(data)))
+        .collect();
+    provided.sort_unstable_by_key(|(index, _)| *index);
+    if provided.len() != proof.indices.len() {
+        return false;
+    }
+    for (slot, (index, hash)) in provided.iter().enumerate() {
+        if *index != proof.indices[slot] || *hash != proof.leaves[slot] {
+            return false;
+        }
+    }
+    proof.verify_inner(hasher, expected_root)
 }
 
 /// Verify that each `(index, leaf_data)` pair matches the corresponding
@@ -713,5 +869,51 @@ mod tests {
             proof.to_string(),
             "leaf_count=0, leaves=0, siblings=0, indices=[]"
         );
+        assert!(proof.verify([0u8; 32]));
+        assert!(verify_compact(&proof, [0xff; 32]));
+        assert!(verify_inclusion_compact(
+            core::iter::empty::<(usize, &[u8])>(),
+            &proof,
+            [0u8; 32]
+        ));
+    }
+
+    #[test]
+    fn handmade_compact_two_leaf_proof_verifies_and_rejects_tampering() {
+        let left = hash_leaf(b"a");
+        let right = hash_leaf(b"b");
+        let root = hash_nodes(&left, &right);
+        let proof = CompactMultiProof {
+            leaf_count: 2,
+            indices: vec![0],
+            leaves: vec![left],
+            siblings: vec![right],
+        };
+        assert!(proof.verify(root));
+        assert!(verify_compact(&proof, root));
+        assert!(verify_inclusion_compact(
+            [(0usize, b"a".as_ref())],
+            &proof,
+            root
+        ));
+        assert!(!verify_inclusion_compact(
+            [(0usize, b"b".as_ref())],
+            &proof,
+            root
+        ));
+        assert!(!proof.verify(hash_leaf(b"nope")));
+
+        let mut bad = proof.clone();
+        bad.siblings[0] = hash_leaf(b"zzz");
+        assert!(!bad.verify(root));
+
+        let mut unsorted = proof.clone();
+        unsorted.indices = vec![1, 0];
+        unsorted.leaves = vec![right, left];
+        assert!(!unsorted.verify(root));
+
+        let mut extra = proof;
+        extra.siblings.push(hash_leaf(b"extra"));
+        assert!(!extra.verify(root));
     }
 }

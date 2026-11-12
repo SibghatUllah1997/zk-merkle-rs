@@ -16,8 +16,8 @@ extern crate alloc;
 
 use alloc::vec::Vec;
 use merkle_tree::{
-    chunk_bytes, from_hex, parse_proof_steps, to_hex32, verify_inclusion, verify_inclusion_many,
-    MerkleLog, MerkleTree,
+    chunk_bytes, from_hex, parse_proof_steps, to_hex32, verify_compact, verify_inclusion,
+    verify_inclusion_compact, verify_inclusion_many, MerkleLog, MerkleTree,
 };
 
 /// Fixed input shared by every check, so results are deterministic.
@@ -67,6 +67,18 @@ pub fn multiproof_verifies() -> bool {
     multi.verify(root) && verify_inclusion_many(picked, &multi, root)
 }
 
+/// Compact multiproof over the same subset: fewer hashes, same root check.
+pub fn compact_multiproof_verifies() -> bool {
+    let tree = MerkleTree::from_leaves(LEAVES);
+    let (Some(root), Some(compact)) = (tree.root(), tree.prove_compact([0, 2, 4])) else {
+        return false;
+    };
+    let picked = [(0, LEAVES[0]), (2, LEAVES[2]), (4, LEAVES[4])];
+    compact.verify(root)
+        && verify_compact(&compact, root)
+        && verify_inclusion_compact(picked, &compact, root)
+}
+
 /// Grow a log one entry at a time; the final root must match a tree built in
 /// one go, and every recorded checkpoint must still line up.
 pub fn log_matches_tree() -> bool {
@@ -103,6 +115,7 @@ pub fn run_all() -> bool {
     single_proofs_verify()
         && proof_text_roundtrip()
         && multiproof_verifies()
+        && compact_multiproof_verifies()
         && log_matches_tree()
         && chunking_roundtrip()
         && hex_roundtrip()
@@ -123,6 +136,7 @@ mod tests {
         assert!(single_proofs_verify());
         assert!(proof_text_roundtrip());
         assert!(multiproof_verifies());
+        assert!(compact_multiproof_verifies());
         assert!(log_matches_tree());
         assert!(chunking_roundtrip());
         assert!(hex_roundtrip());

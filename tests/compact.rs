@@ -1,6 +1,6 @@
-//! Integration tests for compact multi-leaf proof generation.
+//! Integration tests for compact multi-leaf proof generation and verification.
 
-use merkle_tree::{hash_leaf, hash_nodes, MerkleTree};
+use merkle_tree::{hash_leaf, hash_nodes, verify_compact, verify_inclusion_compact, MerkleTree};
 
 fn leaves(n: usize) -> Vec<Vec<u8>> {
     (0..n).map(|i| format!("leaf-{i}").into_bytes()).collect()
@@ -103,4 +103,90 @@ fn compact_hex_helpers_match_stored_hashes() {
         assert_eq!(hex.len(), 64);
         assert_eq!(*hex, merkle_tree::to_hex32(hash));
     }
+}
+
+#[test]
+fn compact_proofs_verify_for_every_subset_of_small_trees() {
+    for n in 1..=8 {
+        let data = leaves(n);
+        let tree = MerkleTree::from_leaves(data.iter().map(|v| v.as_slice()));
+        let root = tree.root().expect("root");
+        let all = tree.prove_compact_all();
+        assert!(all.verify(root));
+        assert!(verify_compact(&all, root));
+        let pairs: Vec<(usize, &[u8])> = data
+            .iter()
+            .enumerate()
+            .map(|(i, v)| (i, v.as_slice()))
+            .collect();
+        assert!(verify_inclusion_compact(pairs, &all, root));
+
+        for i in 0..n {
+            for j in i..n {
+                let compact = tree.prove_compact([i, j]).expect("in range");
+                assert!(compact.verify(root), "n={n} i={i} j={j}");
+                let pairs: Vec<(usize, &[u8])> = compact
+                    .indices
+                    .iter()
+                    .map(|&k| (k, data[k].as_slice()))
+                    .collect();
+                assert!(verify_inclusion_compact(pairs, &compact, root));
+            }
+        }
+    }
+}
+
+#[test]
+fn compact_verifier_rejects_wrong_data_order_is_fine() {
+    let leaves = ["alpha", "beta", "gamma", "delta", "epsilon"];
+    let tree = MerkleTree::from_leaves(leaves.map(|s| s.as_bytes()));
+    let root = tree.root().expect("root");
+    let compact = tree.prove_compact([4, 1, 3]).expect("in range");
+    assert_eq!(compact.indices(), &[1, 3, 4]);
+    assert!(compact.verify(root));
+
+    assert!(verify_inclusion_compact(
+        [
+            (4usize, b"epsilon".as_ref()),
+            (1, b"beta".as_ref()),
+            (3, b"delta".as_ref()),
+        ],
+        &compact,
+        root
+    ));
+    assert!(!verify_inclusion_compact(
+        [
+            (4usize, b"epsilon".as_ref()),
+            (1, b"WRONG".as_ref()),
+            (3, b"delta".as_ref()),
+        ],
+        &compact,
+        root
+    ));
+    assert!(!verify_inclusion_compact(
+        [(1usize, b"beta".as_ref()), (3, b"delta".as_ref())],
+        &compact,
+        root
+    ));
+    assert!(!compact.verify([0u8; 32]));
+}
+
+#[test]
+fn compact_tampered_sibling_or_leaf_count_fails() {
+    let tree = MerkleTree::from_leaves(["a", "b", "c", "d", "e"]);
+    let root = tree.root().expect("root");
+    let mut compact = tree.prove_compact([0, 4]).expect("in range");
+    assert!(compact.verify(root));
+
+    compact.siblings[0][0] ^= 1;
+    assert!(!compact.verify(root));
+    compact.siblings[0][0] ^= 1;
+    assert!(compact.verify(root));
+
+    compact.leaf_count += 1;
+    assert!(!compact.verify(root));
+    compact.leaf_count -= 1;
+
+    compact.leaves[0][0] ^= 1;
+    assert!(!compact.verify(root));
 }

@@ -535,6 +535,7 @@ impl MerkleTree {
     /// let compact = tree.prove_compact([0, 1]).expect("in range");
     /// assert_eq!(compact.indices(), &[0, 1]);
     /// assert_eq!(compact.sibling_count(), 1);
+    /// assert!(compact.verify(tree.root().expect("root")));
     /// ```
     pub fn prove_compact<I>(&self, indices: I) -> Option<CompactMultiProof>
     where
@@ -1033,6 +1034,9 @@ mod tests {
             assert!(compact.siblings.is_empty(), "n={n}");
             if n == 0 {
                 assert!(compact.is_empty());
+                assert!(compact.verify([0u8; 32]));
+            } else {
+                assert!(compact.verify(tree.root().unwrap()), "n={n}");
             }
         }
     }
@@ -1042,6 +1046,7 @@ mod tests {
         let tree = MerkleTree::from_leaves(["a", "b", "c", "d"]);
         let compact = tree.prove_compact([0, 1]).expect("in range");
         assert_eq!(compact.sibling_count(), 1);
+        assert!(compact.verify(tree.root().unwrap()));
         let naive = tree.prove_many([0, 1]).expect("in range");
         let naive_hashes: usize = naive.proofs.iter().map(|p| p.proof.steps.len()).sum();
         assert!(compact.sibling_count() < naive_hashes);

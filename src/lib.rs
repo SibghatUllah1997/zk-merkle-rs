@@ -25,6 +25,10 @@
 //! // Naive multiproof: independent paths, no sibling sharing
 //! let multi = tree.prove_many([0, 2]).expect("in range");
 //! assert!(multi.verify(root));
+//!
+//! // Compact multiproof: overlapping siblings stored once
+//! let compact = tree.prove_compact([0, 2]).expect("in range");
+//! assert!(compact.verify(root));
 //! ```
 //!
 //! Design choices:
@@ -93,7 +97,8 @@ pub use hashing::{
 pub use hashing::{rescue_hash_leaf, rescue_hash_nodes, RESCUE_LEAF_PREFIX, RESCUE_NODE_PREFIX};
 pub use log::{LogCheckpoint, MerkleLog};
 pub use proof::{
-    parse_proof_steps, verify_inclusion, verify_inclusion_many, verify_inclusion_many_with,
+    parse_proof_steps, verify_compact, verify_inclusion, verify_inclusion_compact,
+    verify_inclusion_compact_with, verify_inclusion_many, verify_inclusion_many_with,
     verify_inclusion_with, verify_multiproof, CompactMultiProof, InclusionProof,
     IndexedInclusionProof, MultiProof, ProofStep, SiblingSide,
 };
