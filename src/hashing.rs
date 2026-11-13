@@ -15,13 +15,17 @@
 //! circom-compatible BN254 x^5 via `light-poseidon-nostd`, with its own
 //! `0x10`/`0x11` domain tags. Rescue remains a placeholder that returns
 //! [`crate::error::HashNotImplemented`].
+//!
+//! [`DomainKind`] names the three SHA-256/BLAKE3 prefixes and the reserved
+//! Poseidon/Rescue tags so callers can document the registry without copying
+//! magic numbers.
 
 #[cfg(not(feature = "std"))]
 use alloc::{string::String, vec::Vec};
 
 use sha2::{Digest, Sha256};
 
-use crate::error::{HashNotImplemented, HexError};
+use crate::error::{HashNotImplemented, HexError, UnknownAlgorithm};
 
 #[cfg(feature = "poseidon")]
 use ark_bn254::Fr;
@@ -41,11 +45,12 @@ pub const NODE_PREFIX: u8 = 0x01;
 pub const ROOT_COMMIT_PREFIX: u8 = 0x02;
 
 /// Domain tag mixed into Poseidon leaf hashes (`0x10`).
-#[cfg(feature = "poseidon")]
+///
+/// Reserved even when the `poseidon` feature is off so the domain registry
+/// stays visible without enabling the hash.
 pub const POSEIDON_LEAF_PREFIX: u8 = 0x10;
 
 /// Domain tag mixed into Poseidon parent-node hashes (`0x11`).
-#[cfg(feature = "poseidon")]
 pub const POSEIDON_NODE_PREFIX: u8 = 0x11;
 
 /// Bytes packed into one BN254 field element. 31 bytes is always smaller
@@ -54,12 +59,78 @@ pub const POSEIDON_NODE_PREFIX: u8 = 0x11;
 const POSEIDON_FIELD_CHUNK: usize = 31;
 
 /// Reserved leaf prefix for a future Rescue binding (not hashed yet).
-#[cfg(feature = "rescue")]
 pub const RESCUE_LEAF_PREFIX: u8 = 0x20;
 
 /// Reserved parent-node prefix for a future Rescue binding.
-#[cfg(feature = "rescue")]
 pub const RESCUE_NODE_PREFIX: u8 = 0x21;
+
+/// Which payload a domain-separation tag is hashing.
+///
+/// SHA-256 and BLAKE3 prepend [`Self::prefix`] as a leading byte. Poseidon
+/// mixes [`Self::poseidon_tag`] into the capacity slot instead. Root
+/// commitments are always SHA-256, even when the tree itself used another
+/// hash.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DomainKind {
+    /// Raw leaf bytes: `H(0x00 || data)`.
+    Leaf,
+    /// Two child hashes: `H(0x01 || left || right)`.
+    Node,
+    /// Root bound to its leaf count: `SHA-256(0x02 || n_be || root)`.
+    RootCommit,
+}
+
+impl DomainKind {
+    /// Stable lowercase name (`leaf`, `node`, `root-commit`).
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Leaf => "leaf",
+            Self::Node => "node",
+            Self::RootCommit => "root-commit",
+        }
+    }
+
+    /// SHA-256 / BLAKE3 leading-byte prefix for this domain.
+    pub const fn prefix(self) -> u8 {
+        match self {
+            Self::Leaf => LEAF_PREFIX,
+            Self::Node => NODE_PREFIX,
+            Self::RootCommit => ROOT_COMMIT_PREFIX,
+        }
+    }
+
+    /// Poseidon capacity-slot tag, if this domain is used inside Poseidon.
+    ///
+    /// Root commitments are a SHA-256 wrap of a finished root, so they have
+    /// no Poseidon tag.
+    pub const fn poseidon_tag(self) -> Option<u8> {
+        match self {
+            Self::Leaf => Some(POSEIDON_LEAF_PREFIX),
+            Self::Node => Some(POSEIDON_NODE_PREFIX),
+            Self::RootCommit => None,
+        }
+    }
+
+    /// Reserved Rescue tag, if this domain would be used by a Rescue binding.
+    pub const fn rescue_tag(self) -> Option<u8> {
+        match self {
+            Self::Leaf => Some(RESCUE_LEAF_PREFIX),
+            Self::Node => Some(RESCUE_NODE_PREFIX),
+            Self::RootCommit => None,
+        }
+    }
+
+    /// The three domains this crate actually hashes today.
+    pub const fn all() -> [Self; 3] {
+        [Self::Leaf, Self::Node, Self::RootCommit]
+    }
+}
+
+impl core::fmt::Display for DomainKind {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(self.name())
+    }
+}
 
 /// Which digest a caller asked for. SHA-256 is always available.
 #[non_exhaustive]
@@ -90,6 +161,59 @@ impl HashAlgorithm {
             #[cfg(feature = "rescue")]
             Self::Rescue => "rescue",
         }
+    }
+
+    /// Parse a stable name such as `"sha256"` or `"blake3"`.
+    ///
+    /// Matching is ASCII-case-insensitive and ignores surrounding whitespace.
+    /// Names for algorithms whose crate feature is off are unknown in that
+    /// build, matching the variants that do not exist on the enum.
+    pub fn from_name(name: &str) -> Option<Self> {
+        let name = name.trim();
+        if name.eq_ignore_ascii_case("sha256")
+            || name.eq_ignore_ascii_case("sha-256")
+            || name.eq_ignore_ascii_case("sha2")
+        {
+            return Some(Self::Sha256);
+        }
+        #[cfg(feature = "blake3")]
+        if name.eq_ignore_ascii_case("blake3") {
+            return Some(Self::Blake3);
+        }
+        #[cfg(feature = "poseidon")]
+        if name.eq_ignore_ascii_case("poseidon") {
+            return Some(Self::Poseidon);
+        }
+        #[cfg(feature = "rescue")]
+        if name.eq_ignore_ascii_case("rescue") {
+            return Some(Self::Rescue);
+        }
+        None
+    }
+
+    /// `true` when this algorithm has a real hash implementation in this build.
+    ///
+    /// SHA-256 is always implemented. BLAKE3 and Poseidon are implemented when
+    /// their features are on. Rescue is a named placeholder and returns
+    /// `false`.
+    pub const fn is_implemented(self) -> bool {
+        match self {
+            Self::Sha256 => true,
+            #[cfg(feature = "blake3")]
+            Self::Blake3 => true,
+            #[cfg(feature = "poseidon")]
+            Self::Poseidon => true,
+            #[cfg(feature = "rescue")]
+            Self::Rescue => false,
+        }
+    }
+}
+
+impl core::str::FromStr for HashAlgorithm {
+    type Err = UnknownAlgorithm;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::from_name(s).ok_or(UnknownAlgorithm)
     }
 }
 
@@ -416,6 +540,7 @@ mod tests {
     use super::*;
     #[cfg(feature = "poseidon")]
     use super::{poseidon2, poseidon_chunk_to_field, poseidon_field_to_bytes};
+    use crate::error::UnknownAlgorithm;
     #[cfg(all(feature = "blake3", not(feature = "std")))]
     use alloc::vec;
     #[cfg(not(feature = "std"))]
@@ -444,27 +569,109 @@ mod tests {
         assert_eq!(ROOT_COMMIT_PREFIX, 0x02);
         assert_ne!(ROOT_COMMIT_PREFIX, LEAF_PREFIX);
         assert_ne!(ROOT_COMMIT_PREFIX, NODE_PREFIX);
+        assert_eq!(POSEIDON_LEAF_PREFIX, 0x10);
+        assert_eq!(POSEIDON_NODE_PREFIX, 0x11);
+        assert_ne!(POSEIDON_LEAF_PREFIX, POSEIDON_NODE_PREFIX);
+        assert_ne!(POSEIDON_LEAF_PREFIX, LEAF_PREFIX);
+        assert_ne!(POSEIDON_NODE_PREFIX, NODE_PREFIX);
+        assert_eq!(RESCUE_LEAF_PREFIX, 0x20);
+        assert_eq!(RESCUE_NODE_PREFIX, 0x21);
+        assert_ne!(RESCUE_LEAF_PREFIX, RESCUE_NODE_PREFIX);
+        assert_ne!(RESCUE_LEAF_PREFIX, LEAF_PREFIX);
+        assert_ne!(RESCUE_NODE_PREFIX, NODE_PREFIX);
+        assert_ne!(RESCUE_LEAF_PREFIX, POSEIDON_LEAF_PREFIX);
+        assert_ne!(RESCUE_NODE_PREFIX, POSEIDON_NODE_PREFIX);
+        let prefixes = [
+            LEAF_PREFIX,
+            NODE_PREFIX,
+            ROOT_COMMIT_PREFIX,
+            POSEIDON_LEAF_PREFIX,
+            POSEIDON_NODE_PREFIX,
+            RESCUE_LEAF_PREFIX,
+            RESCUE_NODE_PREFIX,
+        ];
+        for (i, a) in prefixes.iter().enumerate() {
+            for b in prefixes.iter().skip(i + 1) {
+                assert_ne!(a, b);
+            }
+        }
+    }
+
+    #[test]
+    fn domain_kind_matches_prefix_constants() {
+        assert_eq!(DomainKind::Leaf.prefix(), LEAF_PREFIX);
+        assert_eq!(DomainKind::Node.prefix(), NODE_PREFIX);
+        assert_eq!(DomainKind::RootCommit.prefix(), ROOT_COMMIT_PREFIX);
+        assert_eq!(DomainKind::Leaf.poseidon_tag(), Some(POSEIDON_LEAF_PREFIX));
+        assert_eq!(DomainKind::Node.poseidon_tag(), Some(POSEIDON_NODE_PREFIX));
+        assert_eq!(DomainKind::RootCommit.poseidon_tag(), None);
+        assert_eq!(DomainKind::Leaf.rescue_tag(), Some(RESCUE_LEAF_PREFIX));
+        assert_eq!(DomainKind::Node.rescue_tag(), Some(RESCUE_NODE_PREFIX));
+        assert_eq!(DomainKind::RootCommit.rescue_tag(), None);
+        assert_eq!(DomainKind::Leaf.name(), "leaf");
+        assert_eq!(DomainKind::Node.to_string(), "node");
+        assert_eq!(DomainKind::RootCommit.name(), "root-commit");
+        assert_eq!(
+            DomainKind::all(),
+            [DomainKind::Leaf, DomainKind::Node, DomainKind::RootCommit]
+        );
+        // Hash functions must consume the same bytes DomainKind advertises.
+        let mut hasher = Sha256::new();
+        hasher.update([DomainKind::Leaf.prefix()]);
+        hasher.update(b"abc");
+        let from_kind: [u8; 32] = hasher.finalize().into();
+        assert_eq!(from_kind, hash_leaf(b"abc"));
+    }
+
+    #[test]
+    fn hash_algorithm_from_name_and_is_implemented() {
+        assert_eq!(
+            HashAlgorithm::from_name("sha256"),
+            Some(HashAlgorithm::Sha256)
+        );
+        assert_eq!(
+            HashAlgorithm::from_name(" SHA-256 "),
+            Some(HashAlgorithm::Sha256)
+        );
+        assert_eq!(
+            HashAlgorithm::from_name("sha2"),
+            Some(HashAlgorithm::Sha256)
+        );
+        assert_eq!(
+            "sha256".parse::<HashAlgorithm>().expect("name"),
+            HashAlgorithm::Sha256
+        );
+        assert_eq!("nope".parse::<HashAlgorithm>(), Err(UnknownAlgorithm));
+        assert!(HashAlgorithm::Sha256.is_implemented());
+        assert!(HashAlgorithm::from_name("").is_none());
+        #[cfg(feature = "blake3")]
+        {
+            assert_eq!(
+                HashAlgorithm::from_name("BLAKE3"),
+                Some(HashAlgorithm::Blake3)
+            );
+            assert!(HashAlgorithm::Blake3.is_implemented());
+        }
+        #[cfg(not(feature = "blake3"))]
+        assert!(HashAlgorithm::from_name("blake3").is_none());
         #[cfg(feature = "poseidon")]
         {
-            assert_eq!(POSEIDON_LEAF_PREFIX, 0x10);
-            assert_eq!(POSEIDON_NODE_PREFIX, 0x11);
-            assert_ne!(POSEIDON_LEAF_PREFIX, POSEIDON_NODE_PREFIX);
-            assert_ne!(POSEIDON_LEAF_PREFIX, LEAF_PREFIX);
-            assert_ne!(POSEIDON_NODE_PREFIX, NODE_PREFIX);
+            assert_eq!(
+                HashAlgorithm::from_name("poseidon"),
+                Some(HashAlgorithm::Poseidon)
+            );
+            assert!(HashAlgorithm::Poseidon.is_implemented());
         }
         #[cfg(feature = "rescue")]
         {
-            assert_eq!(RESCUE_LEAF_PREFIX, 0x20);
-            assert_eq!(RESCUE_NODE_PREFIX, 0x21);
-            assert_ne!(RESCUE_LEAF_PREFIX, RESCUE_NODE_PREFIX);
-            assert_ne!(RESCUE_LEAF_PREFIX, LEAF_PREFIX);
-            assert_ne!(RESCUE_NODE_PREFIX, NODE_PREFIX);
-            #[cfg(feature = "poseidon")]
-            {
-                assert_ne!(RESCUE_LEAF_PREFIX, POSEIDON_LEAF_PREFIX);
-                assert_ne!(RESCUE_NODE_PREFIX, POSEIDON_NODE_PREFIX);
-            }
+            assert_eq!(
+                HashAlgorithm::from_name("rescue"),
+                Some(HashAlgorithm::Rescue)
+            );
+            assert!(!HashAlgorithm::Rescue.is_implemented());
         }
+        #[cfg(not(feature = "rescue"))]
+        assert!(HashAlgorithm::from_name("rescue").is_none());
     }
 
     #[test]

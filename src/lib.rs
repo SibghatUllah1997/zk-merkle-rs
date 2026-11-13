@@ -39,6 +39,8 @@
 //! - [`MerkleTree::committed_root`] binds the root to the leaf count, so a
 //!   duplicated last leaf cannot pass as a different tree
 //! - Hash function: sha2::Sha256 (audited crate; no hand-rolled crypto)
+//! - Domain tags: [`DomainKind`] names the `0x00`/`0x01`/`0x02` prefixes and
+//!   the reserved Poseidon/Rescue values
 //! - Multiproofs are a list of independent paths; [`CompactMultiProof`]
 //!   stores overlapping siblings once
 //! - Poseidon (feature `poseidon`) is circom-compatible BN254 hashing; Rescue
@@ -72,7 +74,7 @@ pub mod cache;
 pub mod chunk;
 /// Recoverable conversion and parse errors.
 pub mod error;
-/// Domain-separated SHA-256/BLAKE3 hashing, hex helpers, and hash placeholders.
+/// Domain-separated hashing, domain tags, hex helpers, and hash placeholders.
 pub mod hashing;
 /// Append-only log with successive Merkle-root checkpoints.
 pub mod log;
@@ -85,19 +87,21 @@ pub use cache::ProofIndexCache;
 #[cfg(feature = "std")]
 pub use chunk::chunk_reader;
 pub use chunk::{chunk_bytes, chunk_bytes_owned, chunk_count, ChunkSizeError, Chunks};
-pub use error::{try_array32, HashNotImplemented, HexError, LengthError, ParseStepsError};
+pub use error::{
+    try_array32, HashNotImplemented, HexError, LengthError, ParseStepsError, UnknownAlgorithm,
+};
 #[cfg(feature = "blake3")]
 pub use hashing::{blake3_hash_leaf, blake3_hash_nodes};
 pub use hashing::{
     commit_root, from_hex, hash_leaf, hash_leaf_with, hash_nodes, hash_nodes_with, to_hex,
-    to_hex32, try_from_hex32, HashAlgorithm, LEAF_PREFIX, NODE_PREFIX, ROOT_COMMIT_PREFIX,
+    to_hex32, try_from_hex32, DomainKind, HashAlgorithm, LEAF_PREFIX, NODE_PREFIX,
+    POSEIDON_LEAF_PREFIX, POSEIDON_NODE_PREFIX, RESCUE_LEAF_PREFIX, RESCUE_NODE_PREFIX,
+    ROOT_COMMIT_PREFIX,
 };
 #[cfg(feature = "poseidon")]
-pub use hashing::{
-    poseidon_hash_leaf, poseidon_hash_nodes, POSEIDON_LEAF_PREFIX, POSEIDON_NODE_PREFIX,
-};
+pub use hashing::{poseidon_hash_leaf, poseidon_hash_nodes};
 #[cfg(feature = "rescue")]
-pub use hashing::{rescue_hash_leaf, rescue_hash_nodes, RESCUE_LEAF_PREFIX, RESCUE_NODE_PREFIX};
+pub use hashing::{rescue_hash_leaf, rescue_hash_nodes};
 pub use log::{LogCheckpoint, MerkleLog};
 pub use proof::{
     parse_proof_steps, proof_depth, verify_compact, verify_inclusion, verify_inclusion_compact,

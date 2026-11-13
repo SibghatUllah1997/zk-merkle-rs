@@ -122,6 +122,22 @@ impl std::error::Error for ParseStepsError {
     }
 }
 
+/// The hash name was not recognized in this crate build.
+///
+/// Names for algorithms whose feature is off are unknown here, because the
+/// matching [`crate::HashAlgorithm`] variant does not exist in that build.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UnknownAlgorithm;
+
+impl core::fmt::Display for UnknownAlgorithm {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "unknown hash algorithm")
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for UnknownAlgorithm {}
+
 /// Returned when a named hash is selected but has no implementation yet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HashNotImplemented {
@@ -235,5 +251,11 @@ mod tests {
         let rescue = HashNotImplemented::new("rescue");
         assert_eq!(rescue.to_string(), "rescue hashing is not implemented yet");
         assert_ne!(rescue, err);
+    }
+
+    #[test]
+    fn unknown_algorithm_displays() {
+        assert_eq!(UnknownAlgorithm.to_string(), "unknown hash algorithm");
+        assert_eq!(UnknownAlgorithm, UnknownAlgorithm);
     }
 }
