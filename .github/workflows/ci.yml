@@ -52,6 +52,8 @@ jobs:
             flags: --no-default-features --features poseidon,rescue
           - name: no_std+blake3
             flags: --no-default-features --features blake3
+          - name: no_std+merkle_sum
+            flags: --no-default-features --features merkle_sum
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -91,6 +93,7 @@ jobs:
           cargo build --lib --target "$TARGET" --no-default-features --features serde
           cargo build --lib --target "$TARGET" --no-default-features --features blake3
           cargo build --lib --target "$TARGET" --no-default-features --features serde,blake3,poseidon,rescue
+          cargo build --lib --target "$TARGET" --no-default-features --features merkle_sum
 
       - name: Smoke crate format
         working-directory: ci/no-std-smoke
