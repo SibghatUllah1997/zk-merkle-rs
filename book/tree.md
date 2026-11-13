@@ -22,6 +22,9 @@ root:              H(abcd)
 
 Odd counts duplicate the last element only for the parent hash. Three leaves
 `a, b, c` produce parents `H(ab)` and `H(c, c)`, then a root over those two.
+`MerkleTree::layer_widths(3)` is `[3, 2, 1]`. [Padding](padding.md) compares
+that rule to empty-leaf and promote-odd alternatives; [Tree variants](variants.md)
+places this layout next to sparse trees and mountain ranges.
 
 ## Growing a tree
 

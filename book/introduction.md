@@ -6,7 +6,9 @@ to test, and usable from `no_std` crates that still have an allocator.
 
 This book is the long-form companion to the crate docs. It covers the hashing
 rules, how trees are built and padded, how proofs are checked, and how hashes
-are stored so large trees stay in one buffer.
+are stored so large trees stay in one buffer. Later chapters compare this
+binary duplicate-last layout to other Merkle variants, spell out the odd-layer
+padding rule, and list every domain tag the crate reserves.
 
 ## Install
 
@@ -39,4 +41,7 @@ assert!(verify_inclusion(b"c", &proof.steps, root));
 
 `cargo doc --open` still has the API reference. This book is for the *why*:
 why leaves and nodes use different prefixes, why odd layers duplicate the last
-hash, and why the tree keeps every digest in one `Vec`.
+hash, and why the tree keeps every digest in one `Vec`. Start with
+[Tree variants](variants.md) if you are matching another system's root,
+[Padding](padding.md) for the odd-layer rule, and [Domain tags](domains.md)
+for the prefix registry.

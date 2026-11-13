@@ -24,7 +24,8 @@ bytes (`1 + 32 + 32`). A leaf can be any length, including empty.
 
 The constants are `LEAF_PREFIX` (`0x00`) and `NODE_PREFIX` (`0x01`). Poseidon
 uses `0x10`/`0x11` as capacity-slot domain tags, not as byte prefixes in front
-of SHA-256-style input. Rescue still reserves `0x20`/`0x21`.
+of SHA-256-style input. Rescue still reserves `0x20`/`0x21`. `DomainKind`
+names those values; the full registry lives in [Domain tags](domains.md).
 
 ## Choosing an algorithm
 

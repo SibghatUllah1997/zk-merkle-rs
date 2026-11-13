@@ -6,3 +6,6 @@
 - [Inclusion proofs](proofs.md)
 - [Memory layout](layout.md)
 - [Security notes](security.md)
+- [Tree variants](variants.md)
+- [Padding](padding.md)
+- [Domain tags](domains.md)

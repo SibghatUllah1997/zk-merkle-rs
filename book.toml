@@ -1,7 +1,7 @@
 [book]
 title = "merkle-tree"
 authors = ["HM Sibghat Ullah"]
-description = "SHA-256 Merkle trees with inclusion proofs: hashing, padding, layout, and verification"
+description = "SHA-256 Merkle trees with inclusion proofs: hashing, padding, variants, domain tags, layout, and verification"
 language = "en"
 src = "book"
 
