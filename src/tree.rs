@@ -8,6 +8,11 @@
 //! each later layer is the parents of the one below. A non-empty tree's root
 //! is the last stored hash, so walking a proof only needs index arithmetic
 //! inside that buffer instead of chasing a `Vec` per layer.
+//!
+//! Odd layers use duplicate-last padding: the last hash is hashed with itself
+//! to form a parent, and that extra sibling is **not** stored. See
+//! [`MerkleTree::parent_count`], [`MerkleTree::layer_is_padded`], and
+//! [`MerkleTree::layer_widths`].
 
 #[cfg(not(feature = "std"))]
 use alloc::{string::String, vec::Vec};
@@ -106,6 +111,39 @@ pub struct MerkleTree {
     hasher: TreeHasher,
 }
 
+/// Number of parent hashes produced from a layer of `len` nodes using
+/// duplicate-last padding. A layer of 0 or 1 has no parents.
+const fn parent_len(len: usize) -> usize {
+    match len {
+        0 | 1 => 0,
+        n => (n + 1) / 2,
+    }
+}
+
+/// `true` when a layer of `len` hashes hashes its last node with itself.
+///
+/// A single-node layer is the root (or a one-leaf tree) and is not padded.
+const fn padded_layer(len: usize) -> bool {
+    len >= 3 && len % 2 == 1
+}
+
+/// Layer widths from the leaves up to the root for `leaf_count` leaves.
+fn widths(leaf_count: usize) -> Vec<usize> {
+    if leaf_count == 0 {
+        return Vec::new();
+    }
+    let mut out = Vec::with_capacity(stored_layer_count(leaf_count));
+    let mut n = leaf_count;
+    loop {
+        out.push(n);
+        if n <= 1 {
+            break;
+        }
+        n = parent_len(n);
+    }
+    out
+}
+
 /// Exact number of hashes stored for a tree with `leaf_count` leaves, using
 /// duplicate-last padding of odd layers (the padded sibling is not stored).
 fn stored_hash_count(leaf_count: usize) -> usize {
@@ -115,7 +153,7 @@ fn stored_hash_count(leaf_count: usize) -> usize {
     let mut n = leaf_count;
     let mut total = n;
     while n > 1 {
-        n = (n + 1) / 2;
+        n = parent_len(n);
         total += n;
     }
     total
@@ -334,6 +372,53 @@ impl MerkleTree {
     /// ```
     pub fn stored_hash_count(leaf_count: usize) -> usize {
         stored_hash_count(leaf_count)
+    }
+
+    /// Number of parent hashes produced from a layer of `len` nodes.
+    ///
+    /// Odd layers emit one extra parent that hashes the last node with itself.
+    /// A layer of 0 or 1 has no parents.
+    ///
+    /// ```
+    /// use merkle_tree::MerkleTree;
+    ///
+    /// assert_eq!(MerkleTree::parent_count(0), 0);
+    /// assert_eq!(MerkleTree::parent_count(1), 0);
+    /// assert_eq!(MerkleTree::parent_count(2), 1);
+    /// assert_eq!(MerkleTree::parent_count(3), 2);
+    /// ```
+    pub const fn parent_count(len: usize) -> usize {
+        parent_len(len)
+    }
+
+    /// `true` when this layer length hashes its last node with itself.
+    ///
+    /// ```
+    /// use merkle_tree::MerkleTree;
+    ///
+    /// assert!(!MerkleTree::layer_is_padded(1));
+    /// assert!(!MerkleTree::layer_is_padded(2));
+    /// assert!(MerkleTree::layer_is_padded(3));
+    /// ```
+    pub const fn layer_is_padded(len: usize) -> bool {
+        padded_layer(len)
+    }
+
+    /// Width of every layer from the leaves up to the root.
+    ///
+    /// Empty input yields an empty vec. Otherwise the first entry is
+    /// `leaf_count` and the last entry is `1`.
+    ///
+    /// ```
+    /// use merkle_tree::MerkleTree;
+    ///
+    /// assert!(MerkleTree::layer_widths(0).is_empty());
+    /// assert_eq!(MerkleTree::layer_widths(1), vec![1]);
+    /// assert_eq!(MerkleTree::layer_widths(3), vec![3, 2, 1]);
+    /// assert_eq!(MerkleTree::layer_widths(4), vec![4, 2, 1]);
+    /// ```
+    pub fn layer_widths(leaf_count: usize) -> Vec<usize> {
+        widths(leaf_count)
     }
 
     /// Total number of stored hashes, including internal nodes and the root.
