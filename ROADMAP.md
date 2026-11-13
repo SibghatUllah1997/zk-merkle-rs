@@ -2,7 +2,7 @@
 
 This project will evolve from a simple educational Merkle tree to a more featureful library with zk-friendly hash options and tooling.
 
-1. Initialize crate, README, LICENSE, CI, basic SHA-256 tree
+1. Initialize crate, README, LICENSE, CI, basic SHA-256 tree [x]
 2. Add API docs and crate-level docs with examples [x]
 3. Add hex/Display helpers for roots and proofs [x]
 4. Benchmarks: build and proof generation microbench (criterion) [x]
@@ -30,38 +30,24 @@ This project will evolve from a simple educational Merkle tree to a more feature
 26. Add multiproof format and verifier [x]
 27. Add zk-friendly hash implementation (Poseidon) via audited crate [x]
 28. Add preimage resistance considerations and security notes [x]
-29. Add advanced docs: tree variants, padding, and domains
-30. 1.0 polish pass: docs, examples, benches, feature flags, release
+29. [ ] Add advanced docs: tree variants, padding, and domains
+30. [ ] 1.0 polish pass: docs, examples, benches, feature flags, release
 
-## Milestone: Proof of Reserves
+## Phase 2: Proof of Reserves
 
 Goal: allow an exchange to publish a commitment to all user balances and let each user verify inclusion and non-negativity of their balance, plus demonstrate aggregate solvency vs total liabilities.
 
-Order of work (small, incremental items):
+Each item is one small, shippable step. Hashing and range proofs must use audited crates only (existing tree hashes, plus `halo2` for the range-check circuit). Do not hand-roll cryptographic primitives.
 
-1. Define Merkle sum leaf format
-   - Leaf = `(account_id, amount)` with `amount: u128`
-   - Internal node carries `(hash, subtree_sum)` where `subtree_sum = left.sum + right.sum`
-   - Domain-separate sum-tree hashing from regular tree
-2. Implement Merkle sum tree
-   - New `merkle_sum` module feature-gated (default off)
-   - API: `from_leaves`, `root() -> (hash, sum)`, `prove(index) -> SumInclusionProof`
-   - serde support for proofs (optional)
-3. Inclusion proof for a user's balance
-   - Verify both path hashing and that sibling sums aggregate to root sum
-   - Provide example: verify `(account_id, amount)` appears with correct contribution
-4. ZK range proofs for non-negative balances
-   - Choose `halo2` (PSE) for a 64-bit range-check gadget (audited and widely used)
-   - Build a tiny circuit: witness `amount`, prove `0 <= amount < 2^64`
-   - Expose `generate_range_proof(amount)` and `verify_range_proof(proof)`
-   - Feature-gate as `zk-range` with optional `std` dependency for prover
-5. Solvency proof vs total liabilities
-   - Publish `(root_hash, total_sum)` from the Merkle sum tree
-   - Provide tooling to compare published `total_sum` vs independently computed liabilities snapshot
-   - Document assumptions (asset valuation, excluded accounts, timing)
-6. WASM verifier for users
-   - `wasm-bindgen` crate: verify inclusion proof and (optionally) range proof in browser
-   - Small demo page: input account id + amount + proof JSON → verify
-7. Operational docs and examples
-   - CLI flow: build tree from CSV → publish `(root_hash, total_sum)` → export proofs
-   - Threat model notes and limitations
+31. [ ] Define the Merkle sum leaf `(account_id, amount: u128)` and domain-separated node hash `(hash, subtree_sum)` types and docs
+32. [ ] Implement a feature-gated `merkle_sum` tree with `from_leaves` and `root() -> (hash, sum)`
+33. [ ] Add an inclusion proof that checks path hashing and that sibling sums aggregate to the root sum
+34. [ ] Add optional serde support for sum-tree proofs and roots
+35. [ ] Add a CLI command to build a sum tree from CSV and print `(root_hash, total_sum)`
+36. [ ] Add CLI commands to export a per-account inclusion proof and to verify one
+37. [ ] Add property tests that subtree sums equal the sum of leaves and that tampered amounts fail verification
+38. [ ] Add a `zk-range` feature with a 64-bit range-check circuit in the audited `halo2` crate (`0 <= amount < 2^64`)
+39. [ ] Expose `generate_range_proof` and `verify_range_proof`, with tests against a frozen vector
+40. [ ] Add solvency tooling that compares a published `total_sum` to an independently computed liabilities snapshot
+41. [ ] Add a `wasm-bindgen` verifier for inclusion proofs and, optionally, range proofs
+42. [ ] Add a small demo page, CLI runbook, and threat-model notes (valuation, excluded accounts, timing)

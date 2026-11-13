@@ -21,8 +21,8 @@ fn prove_many_matches_individual_proofs_for_small_trees() {
             .collect();
         assert!(verify_inclusion_many(pairs, &all, root));
 
-        for i in 0..n {
-            assert_eq!(all.proofs[i].proof, tree.prove(i).unwrap());
+        for (i, item) in all.proofs.iter().enumerate() {
+            assert_eq!(item.proof, tree.prove(i).unwrap());
         }
     }
 }
