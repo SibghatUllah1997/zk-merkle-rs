@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-13
+
+- Name domain tags and hash algorithms, and expose helpers for duplicate-last padding
+- Add book chapters on tree variants, padding, and domain tags
+- 1.0 polish: committed-root example, feature-flag module, extra benches, version 1.0.0
+
 ## 2026-11-12 (security notes)
 
 - Add `commit_root` and `MerkleTree::committed_root` so a root is bound to its leaf count, which removes the duplicate-last padding ambiguity
