@@ -9,3 +9,4 @@
 - [Tree variants](variants.md)
 - [Padding](padding.md)
 - [Domain tags](domains.md)
+- [Merkle sum trees](sum-tree.md)
