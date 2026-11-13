@@ -65,3 +65,5 @@ poseidon = ["dep:light-poseidon-nostd", "dep:ark-bn254", "dep:ark-ff"]
 rescue = []
 ## BLAKE3 as an alternative, fully implemented hash (no_std friendly).
 blake3 = ["dep:blake3"]
+## Merkle sum tree types for proof of reserves (SHA-256, no extra deps).
+merkle_sum = []
