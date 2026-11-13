@@ -16,6 +16,9 @@ pub const BLAKE3: bool = cfg!(feature = "blake3");
 /// Circom-compatible Poseidon over BN254.
 pub const POSEIDON: bool = cfg!(feature = "poseidon");
 
+/// Merkle sum tree types for proof of reserves.
+pub const MERKLE_SUM: bool = cfg!(feature = "merkle_sum");
+
 /// Rescue placeholder API (`HashNotImplemented`).
 pub const RESCUE: bool = cfg!(feature = "rescue");
 
@@ -35,6 +38,8 @@ pub fn enabled() -> &'static [&'static str] {
         "poseidon",
         #[cfg(feature = "rescue")]
         "rescue",
+        #[cfg(feature = "merkle_sum")]
+        "merkle_sum",
     ]
 }
 
@@ -49,6 +54,7 @@ mod tests {
         assert_eq!(enabled().contains(&"blake3"), BLAKE3);
         assert_eq!(enabled().contains(&"poseidon"), POSEIDON);
         assert_eq!(enabled().contains(&"rescue"), RESCUE);
+        assert_eq!(enabled().contains(&"merkle_sum"), MERKLE_SUM);
         assert_eq!(STD, cfg!(feature = "std"));
         assert_eq!(BLAKE3, cfg!(feature = "blake3"));
         assert_eq!(POSEIDON, cfg!(feature = "poseidon"));

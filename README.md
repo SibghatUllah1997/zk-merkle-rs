@@ -21,6 +21,7 @@ Fast, tiny, no_std-friendly SHA-256 Merkle tree with inclusion proofs and a clea
 - serde support: optional `serde` derive on proof/root types
 - no_std: works without `std` (uses `alloc`) via feature flags
 - BLAKE3: the `blake3` feature adds `BLAKE3(0x00 || data)` / `BLAKE3(0x01 || l || r)` trees via `MerkleTree::try_from_leaves_with(HashAlgorithm::Blake3, ..)` and `verify_with`
+- Merkle sum types: the `merkle_sum` feature adds `SumLeaf` / `SumNode` with `SHA-256(0x30 || id || amount)` leaves and sum-committing `0x31` parents (proof-of-reserves groundwork)
 - Poseidon: the `poseidon` feature hashes with circom-compatible BN254 Poseidon (`0x10`/`0x11` domain tags) via `try_from_leaves_with(HashAlgorithm::Poseidon, ..)`
 - Hash placeholder: the `rescue` feature still returns `HashNotImplemented`
 - Chunking: split buffers or `Read` streams into fixed-size leaves (`chunk_bytes`, `chunk_reader`)
@@ -137,6 +138,7 @@ graph TD
 - Poseidon: `cargo test --features poseidon` and `cargo test --no-default-features --features poseidon`
 - Rescue stub: `cargo test --features rescue` (functions return `HashNotImplemented`)
 - BLAKE3: `cargo test --features blake3` and `cargo test --no-default-features --features blake3`
+- Merkle sum: `cargo test --features merkle_sum`
 - Format and lints: `cargo fmt --all --check` and `cargo clippy --all-targets --all-features -D warnings`
 - Docs: `cargo doc --no-deps` for the API, `mdbook build` for the longer-form book (`book/`, including variants, padding, and domain tags)
 

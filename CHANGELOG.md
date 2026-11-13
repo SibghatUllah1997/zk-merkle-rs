@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-13 (merkle sum types)
+
+- Add a `merkle_sum` feature with `SumLeaf (account_id, amount: u128)` and `SumNode (hash, sum)` for proof of reserves
+- Parent hashes commit to both child hashes and both child sums under new `0x30`/`0x31` domain tags; totals use checked addition
+- Book chapter on sum trees; CI checks the feature in the matrix and on bare metal
+
 ## 2026-11-13
 
 - Name domain tags and hash algorithms, and expose helpers for duplicate-last padding
