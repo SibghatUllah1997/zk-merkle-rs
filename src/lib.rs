@@ -1,4 +1,4 @@
-//! merkle-tree: Educational SHA-256 Merkle tree with inclusion proofs.
+//! merkle-tree: SHA-256 Merkle tree with inclusion proofs.
 //!
 //! This crate provides a small, easy-to-read Merkle tree implementation with
 //! explicit domain separation and a clear API for building trees and verifying
@@ -55,6 +55,7 @@
 //! - [`cache`] — [`ProofIndexCache`] for many proofs from one tree
 //! - [`chunk`] — split byte buffers into fixed-size leaves
 //! - [`log`] — append-only log with successive Merkle-root checkpoints
+//! - [`features`] — which optional crate features this build compiled with
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
@@ -74,6 +75,8 @@ pub mod cache;
 pub mod chunk;
 /// Recoverable conversion and parse errors.
 pub mod error;
+/// Compile-time crate feature flags for this build.
+pub mod features;
 /// Domain-separated hashing, domain tags, hex helpers, and hash placeholders.
 pub mod hashing;
 /// Append-only log with successive Merkle-root checkpoints.

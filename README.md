@@ -27,7 +27,9 @@ Fast, tiny, no_std-friendly SHA-256 Merkle tree with inclusion proofs and a clea
 - Append-only log: `MerkleLog` records a root checkpoint after each append or batch
 - Contiguous layout: all hashes sit in one buffer; `hash_count`, `storage_bytes`, and `layer_hashes` expose it
 - Security: `committed_root` binds a root to its leaf count, and `verify_committed` checks index, depth, and sides; see `book/security.md`
-- Book: `mdbook build` / `mdbook serve` from the repo root (source in `book/`)
+- Domain tags: `DomainKind` names the `0x00`/`0x01`/`0x02` prefixes and the reserved Poseidon/Rescue values
+- Feature flags: `merkle_tree::features` reports which optional hashes this build compiled with
+- Book: `mdbook build` / `mdbook serve` from the repo root (source in `book/`, including variants, padding, and domains)
 - Clear domain separation:
   - Leaf hash: H(0x00 || data)
   - Internal node hash: H(0x01 || left || right)
@@ -69,6 +71,12 @@ Grow an append-only log and print the root after each mutation:
 
 ```bash
 cargo run --example append_only_log
+```
+
+Show why a count-bound root is needed when odd layers duplicate the last hash:
+
+```bash
+cargo run --example committed_root
 ```
 
 ### Usage
@@ -130,7 +138,7 @@ graph TD
 - Rescue stub: `cargo test --features rescue` (functions return `HashNotImplemented`)
 - BLAKE3: `cargo test --features blake3` and `cargo test --no-default-features --features blake3`
 - Format and lints: `cargo fmt --all --check` and `cargo clippy --all-targets --all-features -D warnings`
-- Docs: `cargo doc --no-deps` for the API, `mdbook build` for the longer-form book (`book/`)
+- Docs: `cargo doc --no-deps` for the API, `mdbook build` for the longer-form book (`book/`, including variants, padding, and domain tags)
 
 ### Roadmap
 See `ROADMAP.md` for milestones and upcoming work.

@@ -1,15 +1,15 @@
 [package]
 name = "merkle-tree"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 authors = ["HM Sibghat Ullah <h.m.sibghatullah1997@gmail.com>"]
 license = "MIT OR Apache-2.0"
 rust-version = "1.64"
-description = "Fast, no_std-friendly SHA-256 Merkle tree with inclusion proofs."
+description = "no_std SHA-256 Merkle tree with inclusion proofs, compact multiproofs, and optional BLAKE3 or Poseidon hashes."
 repository = "https://github.com/SibghatUllah1997/zk-merkle-rs"
 readme = "README.md"
-keywords = ["merkle", "sha256", "proofs", "cryptography"]
-categories = ["cryptography", "data-structures"]
+keywords = ["merkle", "sha256", "proofs", "cryptography", "no-std"]
+categories = ["cryptography", "data-structures", "no-std"]
 
 [dependencies]
 sha2 = { version = "0.10", default-features = false }
@@ -39,6 +39,11 @@ name = "append_only_log"
 required-features = ["std"]
 doc = false
 
+[[example]]
+name = "committed_root"
+required-features = ["std"]
+doc = false
+
 [[test]]
 name = "cli_bin"
 path = "tests/cli_bin.rs"
@@ -50,7 +55,9 @@ harness = false
 
 [features]
 default = ["std"]
+## Enable the standard library, the `merkle` CLI, and streaming chunking.
 std = []
+## Serde derives on proof, root, leaf-info, and checkpoint types.
 serde = ["dep:serde"]
 ## Circom-compatible Poseidon (BN254, x^5) via light-poseidon-nostd.
 poseidon = ["dep:light-poseidon-nostd", "dep:ark-bn254", "dep:ark-ff"]

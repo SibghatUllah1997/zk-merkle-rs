@@ -17,7 +17,8 @@ extern crate alloc;
 use alloc::vec::Vec;
 use merkle_tree::{
     chunk_bytes, from_hex, parse_proof_steps, to_hex32, verify_compact, verify_inclusion,
-    verify_inclusion_compact, verify_inclusion_many, MerkleLog, MerkleTree,
+    verify_inclusion_compact, verify_inclusion_many, DomainKind, MerkleLog, MerkleTree,
+    LEAF_PREFIX,
 };
 
 /// Fixed input shared by every check, so results are deterministic.
@@ -110,6 +111,16 @@ pub fn hex_roundtrip() -> bool {
     matches!(from_hex(&to_hex32(&root)), Ok(bytes) if bytes.as_slice() == root.as_slice())
 }
 
+/// Domain tags and padding helpers must be usable without `std`.
+pub fn domains_and_padding() -> bool {
+    DomainKind::Leaf.prefix() == LEAF_PREFIX
+        && DomainKind::RootCommit.poseidon_tag().is_none()
+        && MerkleTree::layer_widths(5) == [5, 3, 2, 1]
+        && MerkleTree::layer_is_padded(5)
+        && !merkle_tree::features::STD
+        && !merkle_tree::features::enabled().contains(&"std")
+}
+
 /// Run every check; handy as a single entry point for firmware-style callers.
 pub fn run_all() -> bool {
     single_proofs_verify()
@@ -119,6 +130,7 @@ pub fn run_all() -> bool {
         && log_matches_tree()
         && chunking_roundtrip()
         && hex_roundtrip()
+        && domains_and_padding()
 }
 
 #[cfg(test)]
@@ -140,6 +152,7 @@ mod tests {
         assert!(log_matches_tree());
         assert!(chunking_roundtrip());
         assert!(hex_roundtrip());
+        assert!(domains_and_padding());
     }
 
     #[test]

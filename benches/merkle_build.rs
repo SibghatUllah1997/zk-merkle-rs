@@ -50,6 +50,25 @@ fn bench_prove_all(n: usize) -> (Duration, Duration) {
     (direct_time, cached_time)
 }
 
+fn bench_multiproof(n: usize) -> (Duration, Duration) {
+    let leaves = generate_leaves(n);
+    let tree = MerkleTree::from_leaves(leaves.iter().map(|v| v.as_slice()));
+    let indices = [0usize, n / 4, n / 2, (3 * n) / 4, n.saturating_sub(1)];
+
+    let start = Instant::now();
+    let naive = tree.prove_many(indices).expect("in range");
+    let naive_time = start.elapsed();
+
+    let start = Instant::now();
+    let compact = tree.prove_compact(indices).expect("in range");
+    let compact_time = start.elapsed();
+
+    let root = tree.root().expect("root");
+    assert!(naive.verify(root));
+    assert!(compact.verify(root));
+    (naive_time, compact_time)
+}
+
 fn run_microbenches() {
     let sizes = [8usize, 64, 512, 4096];
     println!("Microbenchmarks (wall-clock, one-shot):");
@@ -62,6 +81,21 @@ fn run_microbenches() {
     for &n in &sizes {
         let (direct, cached) = bench_prove_all(n);
         println!("  n={:<5} direct={:?} cached={:?}", n, direct, cached);
+    }
+    println!("multiproof (5 indices): naive vs compact:");
+    for &n in &sizes {
+        let (naive, compact) = bench_multiproof(n);
+        println!("  n={:<5} naive={:?} compact={:?}", n, naive, compact);
+    }
+    println!("layout (duplicate-last, hashes stored):");
+    for &n in &sizes {
+        println!(
+            "  n={:<5} hashes={} bytes={} widths={:?}",
+            n,
+            MerkleTree::stored_hash_count(n),
+            MerkleTree::stored_hash_count(n) * 32,
+            MerkleTree::layer_widths(n)
+        );
     }
 }
 
