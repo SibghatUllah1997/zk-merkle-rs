@@ -2,7 +2,7 @@
 #![cfg(feature = "merkle_sum")]
 
 use merkle_tree::sum::{hash_sum_nodes, SUM_LEAF_PREFIX, SUM_NODE_PREFIX};
-use merkle_tree::{SumLeaf, SumNode, SumOverflow};
+use merkle_tree::{MerkleSumTree, SumLeaf, SumNode, SumOverflow};
 use proptest::prelude::*;
 
 #[test]
@@ -19,6 +19,25 @@ fn four_accounts_fold_to_their_total() {
     let root = SumNode::parent(&left, &right).unwrap();
     assert_eq!(root.sum, 100);
     assert_eq!(root.hash, hash_sum_nodes(&left, &right));
+
+    let tree = MerkleSumTree::from_leaves(leaves).unwrap();
+    assert_eq!(tree.root(), Some((root.hash, 100)));
+}
+
+#[test]
+fn odd_leaf_tree_root_sum_equals_the_leaves() {
+    let leaves = [
+        SumLeaf::new([1; 32], 40),
+        SumLeaf::new([2; 32], 2),
+        SumLeaf::new([3; 32], 8),
+    ];
+    let tree = MerkleSumTree::from_leaves(leaves).unwrap();
+    let (hash, total) = tree.root().unwrap();
+    assert_eq!(total, 50);
+    let ab = SumNode::parent(&leaves[0].node(), &leaves[1].node()).unwrap();
+    let expected = SumNode::parent(&ab, &leaves[2].node()).unwrap();
+    assert_eq!((hash, total), (expected.hash, expected.sum));
+    assert!(MerkleSumTree::from_leaves([]).unwrap().root().is_none());
 }
 
 #[test]

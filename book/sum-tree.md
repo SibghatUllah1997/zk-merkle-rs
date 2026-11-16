@@ -43,9 +43,39 @@ root committed to.
 These do not overlap the plain tree (`0x00`-`0x02`), Poseidon (`0x10`/`0x11`),
 or Rescue (`0x20`/`0x21`) tags.
 
+## Building the tree
+
+`MerkleSumTree::from_leaves` builds the tree bottom-up and returns the
+`(hash, total)` root through `root()`. An empty tree has no root; a
+single-leaf tree's root is that leaf's node.
+
+Odd layers promote the last node unchanged. The plain tree's duplicate-last
+padding would hash the last leaf with itself and add its amount twice, so the
+root total would no longer match the liabilities. Promoting keeps
+`root().sum` equal to the sum of the leaves.
+
+```rust
+# #[cfg(feature = "merkle_sum")]
+# {
+use merkle_tree::sum::{MerkleSumTree, SumLeaf};
+
+let tree = MerkleSumTree::from_leaves([
+    SumLeaf::new([1u8; 32], 40),
+    SumLeaf::new([2u8; 32], 2),
+    SumLeaf::new([3u8; 32], 8),
+])
+.expect("no overflow");
+let (_hash, total) = tree.root().expect("non-empty");
+assert_eq!(total, 50);
+# }
+```
+
+A parent whose sums do not fit in `u128` returns `SumOverflow` instead of
+wrapping.
+
 ## What is not here yet
 
-Tree building, inclusion proofs, and range proofs for non-negative balances
-come in later roadmap steps. `u128` already rules out negative amounts in the
-leaf encoding; the range proof will let a user check that without seeing
-other balances.
+Inclusion proofs and range proofs for non-negative balances come in later
+roadmap steps. `u128` already rules out negative amounts in the leaf
+encoding; the range proof will let a user check that without seeing other
+balances.

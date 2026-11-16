@@ -33,6 +33,9 @@
 //! assert_ne!(parent.hash, alice.hash);
 //! ```
 
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+
 use sha2::{Digest, Sha256};
 
 /// Domain tag for a sum-tree leaf hash (`0x30`).
@@ -140,6 +143,99 @@ impl core::fmt::Display for SumOverflow {
 
 #[cfg(feature = "std")]
 impl std::error::Error for SumOverflow {}
+
+/// A Merkle sum tree over [`SumLeaf`] values.
+///
+/// Built bottom-up with [`Self::from_leaves`]. An odd layer promotes the last
+/// node unchanged instead of hashing it with a duplicate of itself: repeating
+/// the last leaf would add its amount twice, so the root total would no longer
+/// match the published liabilities. An empty tree has no root; a single-leaf
+/// tree's root is that leaf's node.
+///
+/// ```
+/// use merkle_tree::sum::{MerkleSumTree, SumLeaf};
+///
+/// let tree = MerkleSumTree::from_leaves([
+///     SumLeaf::new([1u8; 32], 40),
+///     SumLeaf::new([2u8; 32], 2),
+///     SumLeaf::new([3u8; 32], 8),
+/// ])
+/// .expect("no overflow");
+/// let (hash, total) = tree.root().expect("non-empty");
+/// assert_eq!(total, 50);
+/// assert_eq!(hash, tree.root_node().unwrap().hash);
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MerkleSumTree {
+    leaves: Vec<SumLeaf>,
+    /// Layer 0 is the leaf nodes; the last layer holds the root when the
+    /// tree is not empty.
+    layers: Vec<Vec<SumNode>>,
+}
+
+impl MerkleSumTree {
+    /// Build a sum tree from leaves, in the given order.
+    ///
+    /// Returns [`SumOverflow`] if any parent total exceeds `u128`.
+    pub fn from_leaves<I>(leaves: I) -> Result<Self, SumOverflow>
+    where
+        I: IntoIterator<Item = SumLeaf>,
+    {
+        let leaves: Vec<SumLeaf> = leaves.into_iter().collect();
+        if leaves.is_empty() {
+            return Ok(Self {
+                leaves,
+                layers: Vec::new(),
+            });
+        }
+
+        let mut layer: Vec<SumNode> = leaves.iter().map(SumLeaf::node).collect();
+        let mut layers = Vec::new();
+        loop {
+            if layer.len() <= 1 {
+                layers.push(layer);
+                break;
+            }
+            let mut next = Vec::with_capacity((layer.len() + 1) / 2);
+            let mut pairs = layer.chunks_exact(2);
+            for pair in pairs.by_ref() {
+                next.push(SumNode::parent(&pair[0], &pair[1])?);
+            }
+            if let Some(odd) = pairs.remainder().first() {
+                next.push(*odd);
+            }
+            layers.push(layer);
+            layer = next;
+        }
+
+        Ok(Self { leaves, layers })
+    }
+
+    /// Root hash and total, or `None` when the tree is empty.
+    pub fn root(&self) -> Option<([u8; 32], u128)> {
+        self.root_node().map(|node| (node.hash, node.sum))
+    }
+
+    /// Root node, or `None` when the tree is empty.
+    pub fn root_node(&self) -> Option<SumNode> {
+        self.layers.last().and_then(|layer| layer.first()).copied()
+    }
+
+    /// Number of leaves.
+    pub fn len(&self) -> usize {
+        self.leaves.len()
+    }
+
+    /// True when there are no leaves.
+    pub fn is_empty(&self) -> bool {
+        self.leaves.is_empty()
+    }
+
+    /// Leaves in insertion order.
+    pub fn leaves(&self) -> &[SumLeaf] {
+        &self.leaves
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -265,4 +361,89 @@ mod tests {
 
     const A_HASH: &str = "2e6a6228c42bbad04e1a78a92398b943430843b4a91b7a821e2bb5bd61e9191c";
     const P_HASH: &str = "8eb6292d25aa2ac16bcb042f4174f807a8840e5b6d9a67016fe4cc683f658f52";
+
+    #[test]
+    fn empty_tree_has_no_root() {
+        let tree = MerkleSumTree::from_leaves([]).expect("empty");
+        assert!(tree.is_empty());
+        assert_eq!(tree.len(), 0);
+        assert_eq!(tree.root(), None);
+        assert_eq!(tree.root_node(), None);
+        assert!(tree.leaves().is_empty());
+    }
+
+    #[test]
+    fn single_leaf_root_is_the_leaf_node() {
+        let leaf = leaf(1, 99);
+        let tree = MerkleSumTree::from_leaves([leaf]).expect("fits");
+        assert_eq!(tree.len(), 1);
+        assert_eq!(tree.root(), Some((leaf.hash(), 99)));
+        assert_eq!(tree.root_node(), Some(leaf.node()));
+        assert_eq!(tree.leaves(), &[leaf]);
+    }
+
+    #[test]
+    fn two_leaf_root_matches_parent() {
+        let a = leaf(1, 30);
+        let b = leaf(2, 12);
+        let tree = MerkleSumTree::from_leaves([a, b]).expect("fits");
+        let parent = SumNode::parent(&a.node(), &b.node()).expect("fits");
+        assert_eq!(tree.root(), Some((parent.hash, 42)));
+    }
+
+    #[test]
+    fn odd_leaf_count_does_not_double_the_last_amount() {
+        // A, B, C: the last node is promoted, so the total is 40+2+8=50,
+        // not 40+2+8+8 as duplicate-last padding would produce.
+        let leaves = [leaf(1, 40), leaf(2, 2), leaf(3, 8)];
+        let tree = MerkleSumTree::from_leaves(leaves).expect("fits");
+        let (hash, total) = tree.root().expect("non-empty");
+        assert_eq!(total, 50);
+        assert_eq!(total, leaves.iter().map(|l| l.amount).sum::<u128>());
+
+        let ab = SumNode::parent(&leaves[0].node(), &leaves[1].node()).expect("fits");
+        let expected = SumNode::parent(&ab, &leaves[2].node()).expect("fits");
+        assert_eq!(hash, expected.hash);
+        assert_eq!(total, expected.sum);
+
+        let duplicated = SumNode::parent(&leaves[2].node(), &leaves[2].node()).expect("fits");
+        let wrong = SumNode::parent(&ab, &duplicated).expect("fits");
+        assert_ne!(total, wrong.sum);
+        assert_ne!(hash, wrong.hash);
+    }
+
+    #[test]
+    fn four_leaves_sum_and_hash_are_order_sensitive() {
+        let leaves = [leaf(1, 10), leaf(2, 20), leaf(3, 30), leaf(4, 40)];
+        let tree = MerkleSumTree::from_leaves(leaves).expect("fits");
+        let (_, total) = tree.root().expect("non-empty");
+        assert_eq!(total, 100);
+
+        let mut swapped = leaves;
+        swapped.swap(0, 1);
+        let other = MerkleSumTree::from_leaves(swapped).expect("fits");
+        assert_eq!(other.root().map(|r| r.1), Some(100));
+        assert_ne!(tree.root().map(|r| r.0), other.root().map(|r| r.0));
+    }
+
+    #[test]
+    fn from_leaves_rejects_overflow() {
+        let err =
+            MerkleSumTree::from_leaves([leaf(1, u128::MAX), leaf(2, 1)]).expect_err("overflow");
+        assert_eq!(
+            err,
+            SumOverflow {
+                left: u128::MAX,
+                right: 1
+            }
+        );
+    }
+
+    #[test]
+    fn shifting_value_between_leaves_changes_the_root_hash() {
+        let a = MerkleSumTree::from_leaves([leaf(1, 30), leaf(2, 12)]).expect("fits");
+        let b = MerkleSumTree::from_leaves([leaf(1, 31), leaf(2, 11)]).expect("fits");
+        assert_eq!(a.root().map(|r| r.1), b.root().map(|r| r.1));
+        assert_ne!(a.root().map(|r| r.0), b.root().map(|r| r.0));
+    }
 }
