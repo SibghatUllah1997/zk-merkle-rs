@@ -40,7 +40,7 @@ Goal: allow an exchange to publish a commitment to all user balances and let eac
 Each item is one small, shippable step. Hashing and range proofs must use audited crates only (existing tree hashes, plus `halo2` for the range-check circuit). Do not hand-roll cryptographic primitives.
 
 31. [x] Define the Merkle sum leaf `(account_id, amount: u128)` and domain-separated node hash `(hash, subtree_sum)` types and docs
-32. [ ] Implement a feature-gated `merkle_sum` tree with `from_leaves` and `root() -> (hash, sum)`
+32. [x] Implement a feature-gated `merkle_sum` tree with `from_leaves` and `root() -> (hash, sum)`
 33. [ ] Add an inclusion proof that checks path hashing and that sibling sums aggregate to the root sum
 34. [ ] Add optional serde support for sum-tree proofs and roots
 35. [ ] Add a CLI command to build a sum tree from CSV and print `(root_hash, total_sum)`

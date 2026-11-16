@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-16
+
+- Add `MerkleSumTree::from_leaves` behind the `merkle_sum` feature, with `root()` returning `(hash, total)`
+- Odd layers promote the last node instead of duplicating it, so the root total stays equal to the sum of the leaves
+- A parent that would overflow `u128` still returns `SumOverflow`
+
 ## 2026-11-13 (merkle sum types)
 
 - Add a `merkle_sum` feature with `SumLeaf (account_id, amount: u128)` and `SumNode (hash, sum)` for proof of reserves

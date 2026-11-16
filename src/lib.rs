@@ -56,7 +56,7 @@
 //! - [`chunk`] — split byte buffers into fixed-size leaves
 //! - [`log`] — append-only log with successive Merkle-root checkpoints
 //! - [`features`] — which optional crate features this build compiled with
-//! - `sum` (feature `merkle_sum`) — Merkle sum leaf and node types for proof of reserves
+//! - `sum` (feature `merkle_sum`) — Merkle sum tree, leaf, and node types for proof of reserves
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
@@ -84,7 +84,7 @@ pub mod hashing;
 pub mod log;
 /// Inclusion proofs, compact L/R step encoding, and multi-leaf proofs.
 pub mod proof;
-/// Merkle sum tree leaf and node types for proof of reserves.
+/// Merkle sum tree, leaf, and node types for proof of reserves.
 #[cfg(feature = "merkle_sum")]
 pub mod sum;
 /// Merkle tree construction, typed roots, and leaf metadata.
@@ -117,5 +117,5 @@ pub use proof::{
     IndexedInclusionProof, MultiProof, ProofStep, SiblingSide,
 };
 #[cfg(feature = "merkle_sum")]
-pub use sum::{AccountId, SumLeaf, SumNode, SumOverflow};
+pub use sum::{AccountId, MerkleSumTree, SumLeaf, SumNode, SumOverflow};
 pub use tree::{LeafInfo, MerkleRoot, MerkleTree};
