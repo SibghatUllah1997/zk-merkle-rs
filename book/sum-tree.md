@@ -73,9 +73,47 @@ assert_eq!(total, 50);
 A parent whose sums do not fit in `u128` returns `SumOverflow` instead of
 wrapping.
 
+## Inclusion proofs
+
+`MerkleSumTree::prove(index)` returns a `SumInclusionProof`: the leaf index,
+the leaf count, and one `(sibling hash, sibling sum, side)` step per level.
+A promoted node has no sibling at that level, so it adds no step.
+
+`verify(&leaf, &root)` rebuilds each parent with `SumNode::parent`, so the
+hashes and the sums are checked together:
+
+- the index must be below the leaf count, and the number of steps and each
+  step's side must match that position, so a proof cannot be moved or padded
+- sums are added with checked arithmetic, so a sibling cannot wrap the total
+- the rebuilt hash must equal the root hash, and the rebuilt total must equal
+  the root total
+
+Because each parent hash commits to its children's sums, a sibling whose sum
+was edited no longer hashes to the root. A user's own amount plus the sibling
+sums on their path equals the published total.
+
+```rust
+# #[cfg(feature = "merkle_sum")]
+# {
+use merkle_tree::sum::{MerkleSumTree, SumLeaf};
+
+let leaves = [
+    SumLeaf::new([1u8; 32], 40),
+    SumLeaf::new([2u8; 32], 2),
+    SumLeaf::new([3u8; 32], 8),
+];
+let tree = MerkleSumTree::from_leaves(leaves).expect("no overflow");
+let root = tree.root_node().expect("non-empty");
+let proof = tree.prove(2).expect("in range");
+assert!(proof.verify(&leaves[2], &root).is_ok());
+# }
+```
+
+The root does not commit to the leaf count. The count in a proof only fixes
+the expected path shape; check it against the published count separately.
+
 ## What is not here yet
 
-Inclusion proofs and range proofs for non-negative balances come in later
-roadmap steps. `u128` already rules out negative amounts in the leaf
-encoding; the range proof will let a user check that without seeing other
-balances.
+Range proofs for non-negative balances come in later roadmap steps. `u128`
+already rules out negative amounts in the leaf encoding; the range proof will
+let a user check that without seeing other balances.
