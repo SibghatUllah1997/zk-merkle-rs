@@ -42,8 +42,8 @@ Each item is one small, shippable step. Hashing and range proofs must use audite
 31. [x] Define the Merkle sum leaf `(account_id, amount: u128)` and domain-separated node hash `(hash, subtree_sum)` types and docs
 32. [x] Implement a feature-gated `merkle_sum` tree with `from_leaves` and `root() -> (hash, sum)`
 33. [x] Add an inclusion proof that checks path hashing and that sibling sums aggregate to the root sum
-34. [ ] Add optional serde support for sum-tree proofs and roots
-35. [ ] Add a CLI command to build a sum tree from CSV and print `(root_hash, total_sum)`
+34. [x] Add optional serde support for sum-tree proofs and roots
+35. [x] Add a CLI command to build a sum tree from CSV and print `(root_hash, total_sum)`
 36. [ ] Add CLI commands to export a per-account inclusion proof and to verify one
 37. [ ] Add property tests that subtree sums equal the sum of leaves and that tampered amounts fail verification
 38. [ ] Add a `zk-range` feature with a 64-bit range-check circuit in the audited `halo2` crate (`0 <= amount < 2^64`)

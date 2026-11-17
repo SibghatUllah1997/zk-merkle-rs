@@ -112,6 +112,29 @@ assert!(proof.verify(&leaves[2], &root).is_ok());
 The root does not commit to the leaf count. The count in a proof only fixes
 the expected path shape; check it against the published count separately.
 
+## Serde
+
+With the `serde` feature, `SumLeaf`, `SumNode` (the published root),
+`SumProofStep`, and `SumInclusionProof` serialize and deserialize. A proof
+that round-trips through JSON still verifies against the same root.
+
+## CSV and the CLI
+
+`parse_sum_csv` reads `account_id,amount` rows. Account ids are 32-byte hex
+(optional `0x`); amounts are decimal `u128`. Comments (`#`) and a header row
+are skipped.
+
+`merkle sum-build <file>` (needs `std` and `merkle_sum`) builds that tree and
+prints:
+
+```text
+root=<64 hex>
+sum=<total>
+```
+
+The total is the sum of the CSV amounts. Odd layers still promote the last
+node, so the last amount is not counted twice.
+
 ## What is not here yet
 
 Range proofs for non-negative balances come in later roadmap steps. `u128`

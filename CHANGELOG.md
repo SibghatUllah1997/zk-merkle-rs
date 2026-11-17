@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-17 (sum serde and CSV)
+
+- Optional serde on Merkle sum leaves, roots (`SumNode`), and inclusion proofs
+- `merkle sum-build` reads `account_id,amount` CSV and prints the root hash and total
+- The printed total is the sum of the CSV amounts; odd layers still promote the last node
+
 ## 2026-11-17
 
 - Add `MerkleSumTree::prove` and `SumInclusionProof::verify` behind the `merkle_sum` feature
