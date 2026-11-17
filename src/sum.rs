@@ -50,6 +50,7 @@ pub const SUM_NODE_PREFIX: u8 = 0x31;
 pub type AccountId = [u8; 32];
 
 /// One account balance in a Merkle sum tree.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SumLeaf {
     /// Salted, fixed-width account identifier.
@@ -83,6 +84,9 @@ impl SumLeaf {
 }
 
 /// A sum-tree node: a hash plus the total of every leaf beneath it.
+///
+/// This is also the published root: a hash and a total liability.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SumNode {
     /// Domain-separated hash of the subtree.
@@ -260,6 +264,7 @@ fn expected_sides(mut index: usize, mut leaf_count: usize) -> Vec<SiblingSide> {
 
 /// One step of a sum-tree inclusion proof: the sibling `(hash, sum)` and the
 /// side it sits on.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SumProofStep {
     /// Sibling subtree node, including its total.
@@ -275,6 +280,7 @@ pub struct SumProofStep {
 /// rebuilds every parent with [`SumNode::parent`], so the path is only valid
 /// if the hashes chain to the root hash *and* the sums add up, with checked
 /// arithmetic, to the root total.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SumInclusionProof {
     /// Position of the leaf in the tree.
@@ -803,5 +809,15 @@ mod tests {
                 right: u128::MAX
             }))
         );
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn serde_is_implemented_for_sum_roots_and_proofs() {
+        fn assert_serde<T: serde::Serialize + serde::de::DeserializeOwned>() {}
+        assert_serde::<SumLeaf>();
+        assert_serde::<SumNode>();
+        assert_serde::<SumProofStep>();
+        assert_serde::<SumInclusionProof>();
     }
 }

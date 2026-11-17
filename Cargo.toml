@@ -57,7 +57,7 @@ harness = false
 default = ["std"]
 ## Enable the standard library, the `merkle` CLI, and streaming chunking.
 std = []
-## Serde derives on proof, root, leaf-info, and checkpoint types.
+## Serde derives on proof, root, leaf-info, checkpoint, and Merkle-sum types.
 serde = ["dep:serde"]
 ## Circom-compatible Poseidon (BN254, x^5) via light-poseidon-nostd.
 poseidon = ["dep:light-poseidon-nostd", "dep:ark-bn254", "dep:ark-ff"]

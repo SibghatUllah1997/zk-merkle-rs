@@ -7,7 +7,7 @@
 /// Default `std` feature: CLI, [`crate::chunk_reader`], and `std::error::Error`.
 pub const STD: bool = cfg!(feature = "std");
 
-/// Serde derives on proof, root, and metadata types.
+/// Serde derives on proof, root, metadata, and Merkle-sum types.
 pub const SERDE: bool = cfg!(feature = "serde");
 
 /// Domain-separated BLAKE3 hashing.
