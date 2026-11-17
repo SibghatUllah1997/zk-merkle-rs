@@ -118,7 +118,7 @@ pub use proof::{
 };
 #[cfg(feature = "merkle_sum")]
 pub use sum::{
-    AccountId, MerkleSumTree, SumInclusionProof, SumLeaf, SumNode, SumOverflow, SumProofError,
-    SumProofStep,
+    parse_sum_csv, AccountId, MerkleSumTree, SumCsvError, SumInclusionProof, SumLeaf, SumNode,
+    SumOverflow, SumProofError, SumProofStep,
 };
 pub use tree::{LeafInfo, MerkleRoot, MerkleTree};

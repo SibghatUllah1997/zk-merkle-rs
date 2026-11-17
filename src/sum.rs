@@ -34,10 +34,15 @@
 //! ```
 
 #[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
+use alloc::{
+    format,
+    string::{String, ToString},
+    vec::Vec,
+};
 
 use sha2::{Digest, Sha256};
 
+use crate::hashing::try_from_hex32;
 use crate::proof::SiblingSide;
 
 /// Domain tag for a sum-tree leaf hash (`0x30`).
@@ -149,6 +154,108 @@ impl core::fmt::Display for SumOverflow {
 
 #[cfg(feature = "std")]
 impl std::error::Error for SumOverflow {}
+
+/// A problem reading Merkle sum leaves from CSV text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SumCsvError {
+    /// No account rows after comments and an optional header.
+    Empty,
+    /// Line `line` (1-based) could not be parsed as `account_id,amount`.
+    BadLine {
+        /// 1-based source line.
+        line: usize,
+        /// Why the row failed.
+        message: String,
+    },
+}
+
+impl core::fmt::Display for SumCsvError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            SumCsvError::Empty => write!(f, "CSV has no account rows"),
+            SumCsvError::BadLine { line, message } => {
+                write!(f, "CSV line {line}: {message}")
+            }
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for SumCsvError {}
+
+fn parse_sum_csv_row(line: &str) -> Result<SumLeaf, String> {
+    let mut parts = line.split(',');
+    let id_raw = parts
+        .next()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| String::from("missing account id"))?;
+    let amount_raw = parts
+        .next()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| String::from("missing amount"))?;
+    if parts.next().is_some() {
+        return Err(String::from("expected two columns: account_id,amount"));
+    }
+    let account_id = try_from_hex32(id_raw).map_err(|err| err.to_string())?;
+    let amount = amount_raw
+        .parse::<u128>()
+        .map_err(|_| format!("invalid amount {amount_raw:?}"))?;
+    Ok(SumLeaf::new(account_id, amount))
+}
+
+fn looks_like_csv_header(line: &str) -> bool {
+    let first = line.split(',').next().unwrap_or("").trim();
+    let lower = first.to_ascii_lowercase();
+    lower.contains("account") || lower.contains("amount") || lower == "id"
+}
+
+/// Parse `account_id,amount` CSV into [`SumLeaf`] values.
+///
+/// `account_id` is 32-byte hex (optional `0x` prefix). `amount` is a decimal
+/// `u128`. Empty lines and `#` comments are skipped. A header row is skipped
+/// when it is the first non-empty line and is not itself a valid data row.
+///
+/// ```
+/// use merkle_tree::sum::parse_sum_csv;
+///
+/// let leaves = parse_sum_csv(concat!(
+///     "account_id,amount\n",
+///     "1111111111111111111111111111111111111111111111111111111111111111,40\n",
+///     "2222222222222222222222222222222222222222222222222222222222222222,2\n",
+/// ))
+/// .unwrap();
+/// assert_eq!(leaves.len(), 2);
+/// assert_eq!(leaves[0].amount, 40);
+/// ```
+pub fn parse_sum_csv(text: &str) -> Result<Vec<SumLeaf>, SumCsvError> {
+    let mut leaves = Vec::new();
+    let mut skipped_header = false;
+    for (idx, raw) in text.lines().enumerate() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        match parse_sum_csv_row(line) {
+            Ok(leaf) => leaves.push(leaf),
+            Err(_) if leaves.is_empty() && !skipped_header && looks_like_csv_header(line) => {
+                skipped_header = true;
+            }
+            Err(message) => {
+                return Err(SumCsvError::BadLine {
+                    line: idx + 1,
+                    message,
+                });
+            }
+        }
+    }
+    if leaves.is_empty() {
+        Err(SumCsvError::Empty)
+    } else {
+        Ok(leaves)
+    }
+}
 
 /// A Merkle sum tree over [`SumLeaf`] values.
 ///
@@ -809,6 +916,55 @@ mod tests {
                 right: u128::MAX
             }))
         );
+    }
+
+    #[test]
+    fn parse_sum_csv_reads_rows_and_skips_header() {
+        let id_a = crate::hashing::to_hex32(&[1u8; 32]);
+        let id_b = crate::hashing::to_hex32(&[2u8; 32]);
+        let text = format!("account_id,amount\n{id_a},40\n#{id_b},99\n{id_b},2\n");
+        let leaves = parse_sum_csv(&text).expect("csv");
+        assert_eq!(leaves, [leaf(1, 40), leaf(2, 2)]);
+    }
+
+    #[test]
+    fn parse_sum_csv_accepts_0x_ids_and_comments() {
+        let id = crate::hashing::to_hex32(&[9u8; 32]);
+        let text = format!("# balances\n0x{id}, 7 \n");
+        let leaves = parse_sum_csv(&text).expect("csv");
+        assert_eq!(leaves, [leaf(9, 7)]);
+    }
+
+    #[test]
+    fn parse_sum_csv_rejects_empty_and_bad_rows() {
+        assert_eq!(parse_sum_csv("").unwrap_err(), SumCsvError::Empty);
+        assert_eq!(
+            parse_sum_csv("account_id,amount\n").unwrap_err(),
+            SumCsvError::Empty
+        );
+        let id = crate::hashing::to_hex32(&[1u8; 32]);
+        let err = parse_sum_csv(&format!("{id},nope")).unwrap_err();
+        match err {
+            SumCsvError::BadLine { line, message } => {
+                assert_eq!(line, 1);
+                assert!(message.contains("amount"));
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        let err = parse_sum_csv(&format!("{id},1,extra")).unwrap_err();
+        assert!(matches!(err, SumCsvError::BadLine { line: 1, .. }));
+    }
+
+    #[test]
+    fn parse_sum_csv_feeds_a_tree_with_the_printed_total() {
+        let a = crate::hashing::to_hex32(&[1u8; 32]);
+        let b = crate::hashing::to_hex32(&[2u8; 32]);
+        let c = crate::hashing::to_hex32(&[3u8; 32]);
+        let leaves = parse_sum_csv(&format!("{a},40\n{b},2\n{c},8\n")).unwrap();
+        let tree = MerkleSumTree::from_leaves(leaves).unwrap();
+        let (hash, total) = tree.root().unwrap();
+        assert_eq!(total, 50);
+        assert_eq!(hash, tree.root_node().unwrap().hash);
     }
 
     #[cfg(feature = "serde")]
