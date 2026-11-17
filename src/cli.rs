@@ -23,6 +23,10 @@ pub enum Command {
         root: [u8; 32],
         steps: Vec<ProofStep>,
     },
+    /// Build a Merkle sum tree from a CSV file of `account_id,amount` rows.
+    SumBuild {
+        path: String,
+    },
 }
 
 /// Recoverable CLI failure, including usage requests that should print help.
@@ -35,10 +39,18 @@ pub enum CliError {
     MissingValue(&'static str),
     InvalidIndex(String),
     EmptyLeaves,
-    IndexOutOfRange { index: usize, leaf_count: usize },
+    IndexOutOfRange {
+        index: usize,
+        leaf_count: usize,
+    },
     Hex(HexError),
     Steps(ParseStepsError),
     VerificationFailed,
+    Io(String),
+    #[cfg(feature = "merkle_sum")]
+    SumCsv(crate::sum::SumCsvError),
+    #[cfg(feature = "merkle_sum")]
+    SumOverflow(crate::sum::SumOverflow),
 }
 
 impl std::fmt::Display for CliError {
@@ -59,6 +71,11 @@ impl std::fmt::Display for CliError {
             CliError::Hex(err) => write!(f, "{err}"),
             CliError::Steps(err) => write!(f, "{err}"),
             CliError::VerificationFailed => write!(f, "verification failed"),
+            CliError::Io(msg) => write!(f, "{msg}"),
+            #[cfg(feature = "merkle_sum")]
+            CliError::SumCsv(err) => write!(f, "{err}"),
+            #[cfg(feature = "merkle_sum")]
+            CliError::SumOverflow(err) => write!(f, "{err}"),
         }
     }
 }
@@ -68,6 +85,10 @@ impl std::error::Error for CliError {
         match self {
             CliError::Hex(err) => Some(err),
             CliError::Steps(err) => Some(err),
+            #[cfg(feature = "merkle_sum")]
+            CliError::SumCsv(err) => Some(err),
+            #[cfg(feature = "merkle_sum")]
+            CliError::SumOverflow(err) => Some(err),
             _ => None,
         }
     }
@@ -84,6 +105,8 @@ impl CliError {
             | CliError::MissingValue(_)
             | CliError::InvalidIndex(_)
             | CliError::EmptyLeaves => 2,
+            #[cfg(feature = "merkle_sum")]
+            CliError::SumCsv(crate::sum::SumCsvError::Empty) => 2,
             _ => 1,
         }
     }
@@ -97,8 +120,10 @@ pub fn usage() -> &'static str {
         "    merkle build <leaf>...\n",
         "    merkle prove [--index] <index> <leaf>...\n",
         "    merkle verify --leaf <data> --root <hex> [--steps <L|R:hex,...>]\n",
+        "    merkle sum-build <csv-file>\n",
         "    merkle help\n\n",
-        "Leaves are UTF-8 strings. Proof steps are comma-separated L:/R: hex tokens."
+        "Leaves are UTF-8 strings. Proof steps are comma-separated L:/R: hex tokens.\n",
+        "sum-build reads account_id,amount CSV (32-byte hex id, decimal u128) and needs merkle_sum."
     )
 }
 
@@ -118,6 +143,7 @@ where
         "build" => parse_build(args),
         "prove" => parse_prove(args),
         "verify" => parse_verify(args),
+        "sum-build" => parse_sum_build(args),
         other => Err(CliError::UnknownCommand(String::from(other))),
     }
 }
@@ -244,6 +270,44 @@ where
     })
 }
 
+fn parse_sum_build<I, S>(args: I) -> Result<Command, CliError>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let mut path = None;
+    let mut args = args.into_iter();
+    while let Some(arg) = args.next() {
+        let arg = arg.as_ref();
+        if arg == "-h" || arg == "--help" {
+            return Ok(Command::Help);
+        }
+        if arg == "--file" {
+            let value = args.next().ok_or(CliError::MissingValue("--file"))?;
+            path = Some(String::from(value.as_ref()));
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--file=") {
+            if value.is_empty() {
+                return Err(CliError::MissingValue("--file"));
+            }
+            path = Some(String::from(value));
+            continue;
+        }
+        if arg.starts_with('-') {
+            return Err(CliError::UnknownFlag(String::from(arg)));
+        }
+        if path.is_some() {
+            return Err(CliError::Usage(format!(
+                "unexpected argument {arg:?}; sum-build takes one CSV file"
+            )));
+        }
+        path = Some(String::from(arg));
+    }
+    let path = path.ok_or(CliError::MissingValue("<csv-file>"))?;
+    Ok(Command::SumBuild { path })
+}
+
 fn parse_root(raw: &str) -> Result<[u8; 32], CliError> {
     crate::try_from_hex32(raw).map_err(CliError::Hex)
 }
@@ -260,6 +324,7 @@ pub fn run(command: Command) -> Result<String, CliError> {
         Command::Build { leaves } => run_build(&leaves),
         Command::Prove { index, leaves } => run_prove(index, &leaves),
         Command::Verify { leaf, root, steps } => run_verify(&leaf, root, &steps),
+        Command::SumBuild { path } => run_sum_build(&path),
     }
 }
 
@@ -303,6 +368,28 @@ fn run_verify(leaf: &[u8], root: [u8; 32], steps: &[ProofStep]) -> Result<String
         Ok(String::from("ok\n"))
     } else {
         Err(CliError::VerificationFailed)
+    }
+}
+
+fn run_sum_build(path: &str) -> Result<String, CliError> {
+    #[cfg(not(feature = "merkle_sum"))]
+    {
+        let _ = path;
+        Err(CliError::Usage(String::from(
+            "sum-build requires the merkle_sum feature",
+        )))
+    }
+    #[cfg(feature = "merkle_sum")]
+    {
+        use crate::hashing::to_hex32;
+        use crate::sum::{parse_sum_csv, MerkleSumTree};
+
+        let text = std::fs::read_to_string(path)
+            .map_err(|err| CliError::Io(format!("failed to read {path}: {err}")))?;
+        let leaves = parse_sum_csv(&text).map_err(CliError::SumCsv)?;
+        let tree = MerkleSumTree::from_leaves(leaves).map_err(CliError::SumOverflow)?;
+        let (hash, total) = tree.root().expect("parse_sum_csv rejects empty input");
+        Ok(format!("root={}\nsum={total}\n", to_hex32(&hash)))
     }
 }
 
@@ -465,5 +552,65 @@ mod tests {
         ]))
         .unwrap();
         assert_eq!(out, "ok\n");
+    }
+
+    #[test]
+    fn parse_sum_build_path_forms() {
+        let expected = Command::SumBuild {
+            path: String::from("balances.csv"),
+        };
+        assert_eq!(
+            parse_args(args(&["sum-build", "balances.csv"])).unwrap(),
+            expected
+        );
+        assert_eq!(
+            parse_args(args(&["sum-build", "--file", "balances.csv"])).unwrap(),
+            expected
+        );
+        assert_eq!(
+            parse_args(args(&["sum-build", "--file=balances.csv"])).unwrap(),
+            expected
+        );
+        assert!(matches!(
+            parse_args(args(&["sum-build"])).unwrap_err(),
+            CliError::MissingValue("<csv-file>")
+        ));
+        assert!(matches!(
+            parse_args(args(&["sum-build", "a.csv", "b.csv"])).unwrap_err(),
+            CliError::Usage(_)
+        ));
+    }
+
+    #[test]
+    fn sum_build_reads_csv_or_explains_the_feature() {
+        #[cfg(not(feature = "merkle_sum"))]
+        {
+            let err = run_from_args(args(&["sum-build", "missing.csv"])).unwrap_err();
+            assert!(matches!(err, CliError::Usage(_)));
+            assert!(err.to_string().contains("merkle_sum"));
+            assert_eq!(err.exit_code(), 2);
+        }
+        #[cfg(feature = "merkle_sum")]
+        {
+            use crate::hashing::to_hex32;
+            use crate::sum::{MerkleSumTree, SumLeaf};
+
+            let dir = std::env::temp_dir();
+            let path = dir.join("zk-merkle-sum-build.csv");
+            let id_a = to_hex32(&[1u8; 32]);
+            let id_b = to_hex32(&[2u8; 32]);
+            std::fs::write(&path, format!("account_id,amount\n{id_a},40\n{id_b},2\n"))
+                .expect("write csv");
+            let out = run_from_args(args(&["sum-build", path.to_str().unwrap()])).unwrap();
+            let tree = MerkleSumTree::from_leaves([
+                SumLeaf::new([1u8; 32], 40),
+                SumLeaf::new([2u8; 32], 2),
+            ])
+            .unwrap();
+            let (hash, total) = tree.root().unwrap();
+            assert_eq!(out, format!("root={}\nsum={total}\n", to_hex32(&hash)));
+            assert_eq!(total, 42);
+            let _ = std::fs::remove_file(&path);
+        }
     }
 }

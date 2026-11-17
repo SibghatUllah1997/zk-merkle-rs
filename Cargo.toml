@@ -50,6 +50,11 @@ name = "cli_bin"
 path = "tests/cli_bin.rs"
 required-features = ["std"]
 
+[[test]]
+name = "cli_sum"
+path = "tests/cli_sum.rs"
+required-features = ["std", "merkle_sum"]
+
 [[bench]]
 name = "merkle_build"
 harness = false
