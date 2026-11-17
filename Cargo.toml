@@ -22,6 +22,7 @@ ark-ff = { version = "0.5", default-features = false, optional = true }
 
 [dev-dependencies]
 proptest = { version = "=1.5.0", default-features = false, features = ["std"] }
+serde_json = "1.0"
 
 [[bin]]
 name = "merkle"
