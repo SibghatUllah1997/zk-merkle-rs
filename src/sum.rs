@@ -38,6 +38,8 @@ use alloc::vec::Vec;
 
 use sha2::{Digest, Sha256};
 
+use crate::proof::SiblingSide;
+
 /// Domain tag for a sum-tree leaf hash (`0x30`).
 pub const SUM_LEAF_PREFIX: u8 = 0x30;
 
@@ -234,6 +236,217 @@ impl MerkleSumTree {
     /// Leaves in insertion order.
     pub fn leaves(&self) -> &[SumLeaf] {
         &self.leaves
+    }
+}
+
+/// Which sibling side each step of a proof for `index` must have, in a tree
+/// of `leaf_count` leaves.
+///
+/// A level where the node is promoted (last node of an odd layer) has no
+/// sibling and contributes no step, so the shape depends on both values.
+fn expected_sides(mut index: usize, mut leaf_count: usize) -> Vec<SiblingSide> {
+    let mut sides = Vec::new();
+    while leaf_count > 1 {
+        if index % 2 == 1 {
+            sides.push(SiblingSide::Left);
+        } else if index + 1 < leaf_count {
+            sides.push(SiblingSide::Right);
+        }
+        index /= 2;
+        leaf_count = (leaf_count + 1) / 2;
+    }
+    sides
+}
+
+/// One step of a sum-tree inclusion proof: the sibling `(hash, sum)` and the
+/// side it sits on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SumProofStep {
+    /// Sibling subtree node, including its total.
+    pub sibling: SumNode,
+    /// Side of the sibling relative to the running node.
+    pub side: SiblingSide,
+}
+
+/// Proof that one leaf is part of a [`MerkleSumTree`] and that its amount
+/// counts toward the root total.
+///
+/// Each step carries the sibling's sum as well as its hash. The verifier
+/// rebuilds every parent with [`SumNode::parent`], so the path is only valid
+/// if the hashes chain to the root hash *and* the sums add up, with checked
+/// arithmetic, to the root total.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SumInclusionProof {
+    /// Position of the leaf in the tree.
+    pub leaf_index: usize,
+    /// Number of leaves in the tree the proof was made for.
+    pub leaf_count: usize,
+    /// Sibling nodes from the leaf layer up to just below the root.
+    pub steps: Vec<SumProofStep>,
+}
+
+/// Why a [`SumInclusionProof`] was rejected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SumProofError {
+    /// `leaf_index` is not below `leaf_count`.
+    IndexOutOfRange {
+        /// Claimed leaf index.
+        index: usize,
+        /// Claimed leaf count.
+        leaf_count: usize,
+    },
+    /// The proof has a different number of steps than the tree shape needs.
+    PathLength {
+        /// Steps needed for this index and leaf count.
+        expected: usize,
+        /// Steps in the proof.
+        actual: usize,
+    },
+    /// A step's side does not match the leaf's position.
+    WrongSide {
+        /// Step number, counted from the leaf.
+        step: usize,
+    },
+    /// Two sums on the path overflow `u128`.
+    Overflow(SumOverflow),
+    /// The rebuilt hash does not match the root hash.
+    HashMismatch,
+    /// The hash matched but the rebuilt total does not match the root total.
+    SumMismatch {
+        /// Total rebuilt from the leaf and sibling sums.
+        computed: u128,
+        /// Total claimed by the root.
+        expected: u128,
+    },
+}
+
+impl core::fmt::Display for SumProofError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            SumProofError::IndexOutOfRange { index, leaf_count } => {
+                write!(f, "leaf index {index} out of range for {leaf_count} leaves")
+            }
+            SumProofError::PathLength { expected, actual } => {
+                write!(f, "proof has {actual} steps, expected {expected}")
+            }
+            SumProofError::WrongSide { step } => write!(f, "step {step} has the wrong side"),
+            SumProofError::Overflow(err) => write!(f, "{err}"),
+            SumProofError::HashMismatch => write!(f, "rebuilt hash does not match the root"),
+            SumProofError::SumMismatch { computed, expected } => {
+                write!(
+                    f,
+                    "rebuilt total {computed} does not match root total {expected}"
+                )
+            }
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for SumProofError {}
+
+impl From<SumOverflow> for SumProofError {
+    fn from(err: SumOverflow) -> Self {
+        SumProofError::Overflow(err)
+    }
+}
+
+impl SumInclusionProof {
+    /// Rebuild the root node from `leaf` and the proof steps.
+    ///
+    /// Checks the index, the path length, and every step's side against the
+    /// tree shape before hashing, so a proof cannot be moved to another
+    /// position or padded with extra steps.
+    pub fn compute_root(&self, leaf: &SumLeaf) -> Result<SumNode, SumProofError> {
+        if self.leaf_index >= self.leaf_count {
+            return Err(SumProofError::IndexOutOfRange {
+                index: self.leaf_index,
+                leaf_count: self.leaf_count,
+            });
+        }
+        let sides = expected_sides(self.leaf_index, self.leaf_count);
+        if sides.len() != self.steps.len() {
+            return Err(SumProofError::PathLength {
+                expected: sides.len(),
+                actual: self.steps.len(),
+            });
+        }
+
+        let mut node = leaf.node();
+        for (i, (step, side)) in self.steps.iter().zip(sides).enumerate() {
+            if step.side != side {
+                return Err(SumProofError::WrongSide { step: i });
+            }
+            node = match step.side {
+                SiblingSide::Left => SumNode::parent(&step.sibling, &node)?,
+                SiblingSide::Right => SumNode::parent(&node, &step.sibling)?,
+            };
+        }
+        Ok(node)
+    }
+
+    /// Verify that `leaf` is in the tree with root `root` and that the
+    /// sibling sums along the path add up to `root.sum`.
+    pub fn verify(&self, leaf: &SumLeaf, root: &SumNode) -> Result<(), SumProofError> {
+        let computed = self.compute_root(leaf)?;
+        if computed.hash != root.hash {
+            return Err(SumProofError::HashMismatch);
+        }
+        if computed.sum != root.sum {
+            return Err(SumProofError::SumMismatch {
+                computed: computed.sum,
+                expected: root.sum,
+            });
+        }
+        Ok(())
+    }
+}
+
+impl MerkleSumTree {
+    /// Inclusion proof for the leaf at `index`, or `None` if out of range.
+    ///
+    /// ```
+    /// use merkle_tree::sum::{MerkleSumTree, SumLeaf};
+    ///
+    /// let leaves = [
+    ///     SumLeaf::new([1u8; 32], 40),
+    ///     SumLeaf::new([2u8; 32], 2),
+    ///     SumLeaf::new([3u8; 32], 8),
+    /// ];
+    /// let tree = MerkleSumTree::from_leaves(leaves).expect("no overflow");
+    /// let root = tree.root_node().expect("non-empty");
+    ///
+    /// let proof = tree.prove(1).expect("in range");
+    /// assert!(proof.verify(&leaves[1], &root).is_ok());
+    /// // Claiming a different balance fails.
+    /// assert!(proof.verify(&SumLeaf::new([2u8; 32], 3), &root).is_err());
+    /// ```
+    pub fn prove(&self, index: usize) -> Option<SumInclusionProof> {
+        if index >= self.leaves.len() {
+            return None;
+        }
+        let mut steps = Vec::new();
+        let mut i = index;
+        // The last layer is the root, which has no sibling.
+        for layer in &self.layers[..self.layers.len() - 1] {
+            if i % 2 == 1 {
+                steps.push(SumProofStep {
+                    sibling: layer[i - 1],
+                    side: SiblingSide::Left,
+                });
+            } else if let Some(sibling) = layer.get(i + 1) {
+                steps.push(SumProofStep {
+                    sibling: *sibling,
+                    side: SiblingSide::Right,
+                });
+            }
+            i /= 2;
+        }
+        Some(SumInclusionProof {
+            leaf_index: index,
+            leaf_count: self.leaves.len(),
+            steps,
+        })
     }
 }
 

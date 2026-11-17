@@ -117,5 +117,8 @@ pub use proof::{
     IndexedInclusionProof, MultiProof, ProofStep, SiblingSide,
 };
 #[cfg(feature = "merkle_sum")]
-pub use sum::{AccountId, MerkleSumTree, SumLeaf, SumNode, SumOverflow};
+pub use sum::{
+    AccountId, MerkleSumTree, SumInclusionProof, SumLeaf, SumNode, SumOverflow, SumProofError,
+    SumProofStep,
+};
 pub use tree::{LeafInfo, MerkleRoot, MerkleTree};
