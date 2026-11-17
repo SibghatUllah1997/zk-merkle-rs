@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-17
+
+- Add `MerkleSumTree::prove` and `SumInclusionProof::verify` behind the `merkle_sum` feature
+- Verification rebuilds each parent from hash and sum, so the path must hash to the root and the sums must add up to the root total
+- Index, path length, and step sides are checked against the leaf position; overflow and mismatches return `SumProofError`
+
 ## 2026-11-16
 
 - Add `MerkleSumTree::from_leaves` behind the `merkle_sum` feature, with `root()` returning `(hash, total)`
