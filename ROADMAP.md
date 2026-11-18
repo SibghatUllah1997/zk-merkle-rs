@@ -44,7 +44,7 @@ Each item is one small, shippable step. Hashing and range proofs must use audite
 33. [x] Add an inclusion proof that checks path hashing and that sibling sums aggregate to the root sum
 34. [x] Add optional serde support for sum-tree proofs and roots
 35. [x] Add a CLI command to build a sum tree from CSV and print `(root_hash, total_sum)`
-36. [ ] Add CLI commands to export a per-account inclusion proof and to verify one
+36. [x] Add CLI commands to export a per-account inclusion proof and to verify one
 37. [ ] Add property tests that subtree sums equal the sum of leaves and that tampered amounts fail verification
 38. [ ] Add a `zk-range` feature with a 64-bit range-check circuit in the audited `halo2` crate (`0 <= amount < 2^64`)
 39. [ ] Expose `generate_range_proof` and `verify_range_proof`, with tests against a frozen vector
