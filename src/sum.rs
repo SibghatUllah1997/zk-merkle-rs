@@ -42,7 +42,7 @@ use alloc::{
 
 use sha2::{Digest, Sha256};
 
-use crate::hashing::try_from_hex32;
+use crate::hashing::{to_hex32, try_from_hex32};
 use crate::proof::SiblingSide;
 
 /// Domain tag for a sum-tree leaf hash (`0x30`).
@@ -567,6 +567,188 @@ impl MerkleSumTree {
     }
 }
 
+/// Why a sum-proof text file could not be read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SumProofTextError {
+    /// Line `line` (1-based) is not a `key=value` pair this format knows.
+    BadLine {
+        /// 1-based source line.
+        line: usize,
+        /// Why the line failed.
+        message: String,
+    },
+    /// A required key never appeared.
+    Missing(&'static str),
+    /// A key that may appear only once appeared twice.
+    Duplicate(&'static str),
+}
+
+impl core::fmt::Display for SumProofTextError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            SumProofTextError::BadLine { line, message } => {
+                write!(f, "proof line {line}: {message}")
+            }
+            SumProofTextError::Missing(key) => write!(f, "proof is missing {key}="),
+            SumProofTextError::Duplicate(key) => write!(f, "proof repeats {key}="),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for SumProofTextError {}
+
+/// Render `leaf` and `proof` as the line-based text the CLI exports.
+///
+/// ```text
+/// account=<64 hex chars>
+/// amount=<decimal u128>
+/// index=<leaf index>
+/// leaf_count=<leaves in the tree>
+/// step=<L|R>:<sibling hash hex>:<sibling sum>
+/// ```
+///
+/// One `step=` line per level, ordered from the leaf up. The root is left
+/// out on purpose: a user must check the proof against the root the exchange
+/// published, not against a value shipped inside the same file.
+///
+/// ```
+/// use merkle_tree::sum::{parse_sum_proof_text, sum_proof_to_text, MerkleSumTree, SumLeaf};
+///
+/// let leaves = [SumLeaf::new([1u8; 32], 40), SumLeaf::new([2u8; 32], 2)];
+/// let tree = MerkleSumTree::from_leaves(leaves).unwrap();
+/// let proof = tree.prove(0).unwrap();
+///
+/// let text = sum_proof_to_text(&leaves[0], &proof);
+/// let (leaf, parsed) = parse_sum_proof_text(&text).unwrap();
+/// assert_eq!(leaf, leaves[0]);
+/// assert!(parsed.verify(&leaf, &tree.root_node().unwrap()).is_ok());
+/// ```
+pub fn sum_proof_to_text(leaf: &SumLeaf, proof: &SumInclusionProof) -> String {
+    let mut out = format!(
+        "account={}\namount={}\nindex={}\nleaf_count={}\n",
+        to_hex32(&leaf.account_id),
+        leaf.amount,
+        proof.leaf_index,
+        proof.leaf_count
+    );
+    for step in &proof.steps {
+        out.push_str(&format!(
+            "step={}:{}:{}\n",
+            step.side.as_char(),
+            to_hex32(&step.sibling.hash),
+            step.sibling.sum
+        ));
+    }
+    out
+}
+
+fn parse_sum_step(value: &str) -> Result<SumProofStep, String> {
+    let mut parts = value.split(':');
+    let side_raw = parts.next().unwrap_or("");
+    let hash_raw = parts
+        .next()
+        .ok_or_else(|| String::from("step needs side:hash:sum"))?;
+    let sum_raw = parts
+        .next()
+        .ok_or_else(|| String::from("step needs side:hash:sum"))?;
+    if parts.next().is_some() {
+        return Err(String::from("step needs side:hash:sum"));
+    }
+    let side = SiblingSide::from_label(side_raw)
+        .ok_or_else(|| format!("invalid step side {side_raw:?}"))?;
+    let hash = try_from_hex32(hash_raw).map_err(|err| err.to_string())?;
+    let sum = sum_raw
+        .parse::<u128>()
+        .map_err(|_| format!("invalid step sum {sum_raw:?}"))?;
+    Ok(SumProofStep {
+        sibling: SumNode::new(hash, sum),
+        side,
+    })
+}
+
+fn set_once<T>(slot: &mut Option<T>, value: T, key: &'static str) -> Result<(), SumProofTextError> {
+    if slot.is_some() {
+        return Err(SumProofTextError::Duplicate(key));
+    }
+    *slot = Some(value);
+    Ok(())
+}
+
+/// Parse text written by [`sum_proof_to_text`] back into a leaf and proof.
+///
+/// Blank lines and `#` comments are skipped. Unknown keys are rejected so a
+/// typo cannot silently drop a field. Parsing does not verify anything; call
+/// [`SumInclusionProof::verify`] with the published root afterwards.
+pub fn parse_sum_proof_text(text: &str) -> Result<(SumLeaf, SumInclusionProof), SumProofTextError> {
+    let mut account = None;
+    let mut amount = None;
+    let mut index = None;
+    let mut leaf_count = None;
+    let mut steps = Vec::new();
+
+    for (idx, raw) in text.lines().enumerate() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let bad = |message: String| SumProofTextError::BadLine {
+            line: idx + 1,
+            message,
+        };
+        let (key, value) = line
+            .split_once('=')
+            .ok_or_else(|| bad(String::from("expected key=value")))?;
+        let value = value.trim();
+        match key.trim() {
+            "account" => {
+                let id = try_from_hex32(value).map_err(|err| bad(err.to_string()))?;
+                set_once(&mut account, id, "account")?;
+            }
+            "amount" => {
+                let v = value
+                    .parse::<u128>()
+                    .map_err(|_| bad(format!("invalid amount {value:?}")))?;
+                set_once(&mut amount, v, "amount")?;
+            }
+            "index" => {
+                let v = value
+                    .parse::<usize>()
+                    .map_err(|_| bad(format!("invalid index {value:?}")))?;
+                set_once(&mut index, v, "index")?;
+            }
+            "leaf_count" => {
+                let v = value
+                    .parse::<usize>()
+                    .map_err(|_| bad(format!("invalid leaf_count {value:?}")))?;
+                set_once(&mut leaf_count, v, "leaf_count")?;
+            }
+            "step" => steps.push(parse_sum_step(value).map_err(bad)?),
+            other => return Err(bad(format!("unknown key {other:?}"))),
+        }
+    }
+
+    let leaf = SumLeaf::new(
+        account.ok_or(SumProofTextError::Missing("account"))?,
+        amount.ok_or(SumProofTextError::Missing("amount"))?,
+    );
+    let proof = SumInclusionProof {
+        leaf_index: index.ok_or(SumProofTextError::Missing("index"))?,
+        leaf_count: leaf_count.ok_or(SumProofTextError::Missing("leaf_count"))?,
+        steps,
+    };
+    Ok((leaf, proof))
+}
+
+impl MerkleSumTree {
+    /// Index of the first leaf whose account id is `account_id`.
+    pub fn position(&self, account_id: &AccountId) -> Option<usize> {
+        self.leaves
+            .iter()
+            .position(|leaf| &leaf.account_id == account_id)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -965,6 +1147,103 @@ mod tests {
         let (hash, total) = tree.root().unwrap();
         assert_eq!(total, 50);
         assert_eq!(hash, tree.root_node().unwrap().hash);
+    }
+
+    fn five_leaf_tree() -> (Vec<SumLeaf>, MerkleSumTree) {
+        let leaves: Vec<SumLeaf> = (1..=5).map(|i| leaf(i, u128::from(i) * 10)).collect();
+        let tree = MerkleSumTree::from_leaves(leaves.clone()).unwrap();
+        (leaves, tree)
+    }
+
+    #[test]
+    fn proof_text_round_trips_for_every_leaf() {
+        let (leaves, tree) = five_leaf_tree();
+        let root = tree.root_node().unwrap();
+        for (i, l) in leaves.iter().enumerate() {
+            let proof = tree.prove(i).unwrap();
+            let text = sum_proof_to_text(l, &proof);
+            let (parsed_leaf, parsed) = parse_sum_proof_text(&text).unwrap();
+            assert_eq!(&parsed_leaf, l);
+            assert_eq!(parsed, proof);
+            assert!(parsed.verify(&parsed_leaf, &root).is_ok());
+        }
+    }
+
+    #[test]
+    fn proof_text_has_one_step_line_per_level() {
+        let (leaves, tree) = five_leaf_tree();
+        // Leaf 4 is promoted twice in a 5-leaf tree, so it has one step.
+        let text = sum_proof_to_text(&leaves[4], &tree.prove(4).unwrap());
+        assert_eq!(text.lines().filter(|l| l.starts_with("step=")).count(), 1);
+        assert!(text.contains("index=4\nleaf_count=5\n"));
+        assert!(text.ends_with('\n'));
+    }
+
+    #[test]
+    fn proof_text_skips_comments_and_blank_lines() {
+        let (leaves, tree) = five_leaf_tree();
+        let text = sum_proof_to_text(&leaves[1], &tree.prove(1).unwrap());
+        let noisy = format!("# exported proof\n\n{text}\n");
+        assert_eq!(
+            parse_sum_proof_text(&noisy).unwrap(),
+            parse_sum_proof_text(&text).unwrap()
+        );
+    }
+
+    #[test]
+    fn edited_amount_in_proof_text_fails_verification() {
+        let (leaves, tree) = five_leaf_tree();
+        let root = tree.root_node().unwrap();
+        let text = sum_proof_to_text(&leaves[2], &tree.prove(2).unwrap());
+        let edited = text.replace("amount=30\n", "amount=31\n");
+        let (l, proof) = parse_sum_proof_text(&edited).unwrap();
+        assert_eq!(l.amount, 31);
+        assert_eq!(proof.verify(&l, &root), Err(SumProofError::HashMismatch));
+    }
+
+    #[test]
+    fn proof_text_rejects_bad_input() {
+        let (leaves, tree) = five_leaf_tree();
+        let text = sum_proof_to_text(&leaves[0], &tree.prove(0).unwrap());
+
+        let without_amount: String = text
+            .lines()
+            .filter(|l| !l.starts_with("amount="))
+            .map(|l| format!("{l}\n"))
+            .collect();
+        assert_eq!(
+            parse_sum_proof_text(&without_amount).unwrap_err(),
+            SumProofTextError::Missing("amount")
+        );
+        assert_eq!(
+            parse_sum_proof_text(&format!("{text}index=1\n")).unwrap_err(),
+            SumProofTextError::Duplicate("index")
+        );
+        let cases = [
+            "colour=blue",
+            "amount=-1",
+            "account=abcd",
+            "step=X:00:1",
+            "step=L:00",
+            "no equals sign",
+        ];
+        for bad in cases {
+            let err = parse_sum_proof_text(&format!("{text}{bad}\n")).unwrap_err();
+            assert!(
+                matches!(err, SumProofTextError::BadLine { .. }),
+                "{bad}: {err:?}"
+            );
+        }
+        let hash = to_hex32(&[9u8; 32]);
+        let err = parse_sum_proof_text(&format!("{text}step=L:{hash}:x\n")).unwrap_err();
+        assert!(err.to_string().contains("invalid step sum"));
+    }
+
+    #[test]
+    fn position_finds_the_first_matching_account() {
+        let (_, tree) = five_leaf_tree();
+        assert_eq!(tree.position(&[3u8; 32]), Some(2));
+        assert_eq!(tree.position(&[9u8; 32]), None);
     }
 
     #[cfg(feature = "serde")]
