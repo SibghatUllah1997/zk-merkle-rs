@@ -73,6 +73,13 @@ assert_eq!(total, 50);
 A parent whose sums do not fit in `u128` returns `SumOverflow` instead of
 wrapping.
 
+`layer_count` and `layer_nodes` expose that layout. Layer 0 is the leaves;
+each parent sum is the checked total of its children, and a leftover node is
+copied up unchanged. The published root total is therefore the sum of the
+leaves. Property tests in `tests/proptest_sum.rs` check this for random
+trees, and they check that a changed leaf or sibling amount fails
+`SumInclusionProof::verify`.
+
 ## Inclusion proofs
 
 `MerkleSumTree::prove(index)` returns a `SumInclusionProof`: the leaf index,

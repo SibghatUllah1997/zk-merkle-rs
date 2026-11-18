@@ -134,7 +134,7 @@ graph TD
 
 ### Testing
 - Run unit tests and doctests: `cargo test`
-- Property tests: `cargo test --test proptest_hashing --test proptest_tree`
+- Property tests: `cargo test --test proptest_hashing --test proptest_tree` and `cargo test --features merkle_sum --test proptest_sum`
 - Fuzzing (nightly): see `fuzz/README.md` (`cargo +nightly fuzz run tree_prove`)
 - no_std surface: `cargo test --no-default-features` and `cargo test --no-default-features --features serde`
 - Bare-metal no_std check: `rustup target add thumbv7em-none-eabihf`, then `cargo build --lib --target thumbv7em-none-eabihf --no-default-features`; the `ci/no-std-smoke` crate builds the same way and runs its checks on the host with `cargo test`

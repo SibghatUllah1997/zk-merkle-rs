@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-18 (sum-tree properties)
+
+- Property tests check that every subtree sum equals the folded leaf amounts
+- A changed leaf amount or sibling sum fails inclusion verification
+- `layer_nodes` exposes each layer so those totals can be inspected
+
 ## 2026-11-18 (sum proof CLI)
 
 - `merkle sum-prove <csv> --account <hex>` prints one account's sum-tree proof as `key=value` lines

@@ -56,7 +56,7 @@
 //! - [`chunk`] — split byte buffers into fixed-size leaves
 //! - [`log`] — append-only log with successive Merkle-root checkpoints
 //! - [`features`] — which optional crate features this build compiled with
-//! - `sum` (feature `merkle_sum`) — Merkle sum tree, inclusion proofs, CSV leaves, and serde-ready roots
+//! - `sum` (feature `merkle_sum`) — Merkle sum tree, inclusion proofs, CSV leaves, layer totals, and serde-ready roots
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
