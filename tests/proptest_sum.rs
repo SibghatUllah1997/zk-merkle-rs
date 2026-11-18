@@ -1,7 +1,7 @@
 //! Property tests for Merkle sum-tree totals and subtree sums.
 #![cfg(feature = "merkle_sum")]
 
-use merkle_tree::{MerkleSumTree, SumLeaf, SumNode};
+use merkle_tree::{MerkleSumTree, SumLeaf, SumNode, SumProofError};
 use proptest::prelude::*;
 use proptest::test_runner::FileFailurePersistence;
 
@@ -112,5 +112,40 @@ proptest! {
             }
             prop_assert!(parent_iter.next().is_none());
         }
+    }
+
+    #[test]
+    fn tampered_leaf_amount_fails_verification(
+        leaves in nonempty_leaves(),
+        which in any::<prop::sample::Index>(),
+    ) {
+        let tree = MerkleSumTree::from_leaves(leaves.clone()).expect("small amounts fit");
+        let root = tree.root_node().expect("non-empty");
+        let i = which.index(leaves.len());
+        let proof = tree.prove(i).expect("in range");
+        prop_assert_eq!(proof.verify(&leaves[i], &root), Ok(()));
+
+        let lie = SumLeaf::new(leaves[i].account_id, leaves[i].amount ^ 1);
+        prop_assert_eq!(proof.verify(&lie, &root), Err(SumProofError::HashMismatch));
+        prop_assert_ne!(lie.hash(), leaves[i].hash());
+    }
+
+    #[test]
+    fn tampered_sibling_amount_fails_when_the_path_has_steps(
+        leaves in prop::collection::vec(sum_leaf(), 2..=16),
+        which in any::<prop::sample::Index>(),
+        step in any::<prop::sample::Index>(),
+    ) {
+        let tree = MerkleSumTree::from_leaves(leaves.clone()).expect("small amounts fit");
+        let root = tree.root_node().expect("non-empty");
+        let i = which.index(leaves.len());
+        let mut proof = tree.prove(i).expect("in range");
+        prop_assume!(!proof.steps.is_empty());
+        let j = step.index(proof.steps.len());
+        proof.steps[j].sibling.sum ^= 1;
+        prop_assert_eq!(
+            proof.verify(&leaves[i], &root),
+            Err(SumProofError::HashMismatch)
+        );
     }
 }
