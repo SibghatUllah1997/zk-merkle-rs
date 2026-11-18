@@ -135,6 +135,30 @@ sum=<total>
 The total is the sum of the CSV amounts. Odd layers still promote the last
 node, so the last amount is not counted twice.
 
+## Exporting and checking one account's proof
+
+`merkle sum-prove <file> --account <hex>` rebuilds the tree from the same CSV
+and prints the proof for that account as plain `key=value` lines:
+
+```text
+account=<64 hex>
+amount=<decimal>
+index=<leaf index>
+leaf_count=<leaves in the tree>
+step=<L|R>:<sibling hash hex>:<sibling sum>
+```
+
+There is one `step=` line per level, from the leaf up. `sum_proof_to_text`
+and `parse_sum_proof_text` write and read the same format from the library,
+so it works without `serde`.
+
+`merkle sum-verify <proof-file> --root <hex> --sum <total>` checks it. It
+prints `ok` with the account and amount, or exits with code 1 and says
+whether the hash or the total did not match.
+
+The proof file does not carry the root. The user should pass the root and
+total the exchange published, so a proof file cannot vouch for itself.
+
 ## What is not here yet
 
 Range proofs for non-negative balances come in later roadmap steps. `u128`

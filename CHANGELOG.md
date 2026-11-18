@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-18 (sum proof CLI)
+
+- `merkle sum-prove <csv> --account <hex>` prints one account's sum-tree proof as `key=value` lines
+- `merkle sum-verify <proof> --root <hex> --sum <total>` checks it against the published root and total; the file never carries the root
+- Library helpers `sum_proof_to_text`, `parse_sum_proof_text`, and `MerkleSumTree::position`, so the format needs no serde
+
 ## 2026-11-17 (sum serde and CSV)
 
 - Optional serde on Merkle sum leaves, roots (`SumNode`), and inclusion proofs
