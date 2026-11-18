@@ -27,6 +27,17 @@ pub enum Command {
     SumBuild {
         path: String,
     },
+    /// Export the inclusion proof for one account in a CSV-built sum tree.
+    SumProve {
+        path: String,
+        account: [u8; 32],
+    },
+    /// Check an exported sum-tree proof against a published root and total.
+    SumVerify {
+        path: String,
+        root: [u8; 32],
+        sum: u128,
+    },
 }
 
 /// Recoverable CLI failure, including usage requests that should print help.
@@ -47,6 +58,12 @@ pub enum CliError {
     Steps(ParseStepsError),
     VerificationFailed,
     Io(String),
+    InvalidSum(String),
+    AccountNotFound(String),
+    #[cfg(feature = "merkle_sum")]
+    SumProof(crate::sum::SumProofError),
+    #[cfg(feature = "merkle_sum")]
+    SumProofText(crate::sum::SumProofTextError),
     #[cfg(feature = "merkle_sum")]
     SumCsv(crate::sum::SumCsvError),
     #[cfg(feature = "merkle_sum")]
@@ -72,6 +89,14 @@ impl std::fmt::Display for CliError {
             CliError::Steps(err) => write!(f, "{err}"),
             CliError::VerificationFailed => write!(f, "verification failed"),
             CliError::Io(msg) => write!(f, "{msg}"),
+            CliError::InvalidSum(raw) => {
+                write!(f, "invalid total {raw:?}; expected a decimal u128")
+            }
+            CliError::AccountNotFound(id) => write!(f, "account {id} is not in the CSV"),
+            #[cfg(feature = "merkle_sum")]
+            CliError::SumProof(err) => write!(f, "verification failed: {err}"),
+            #[cfg(feature = "merkle_sum")]
+            CliError::SumProofText(err) => write!(f, "{err}"),
             #[cfg(feature = "merkle_sum")]
             CliError::SumCsv(err) => write!(f, "{err}"),
             #[cfg(feature = "merkle_sum")]
@@ -89,6 +114,10 @@ impl std::error::Error for CliError {
             CliError::SumCsv(err) => Some(err),
             #[cfg(feature = "merkle_sum")]
             CliError::SumOverflow(err) => Some(err),
+            #[cfg(feature = "merkle_sum")]
+            CliError::SumProof(err) => Some(err),
+            #[cfg(feature = "merkle_sum")]
+            CliError::SumProofText(err) => Some(err),
             _ => None,
         }
     }
@@ -104,6 +133,7 @@ impl CliError {
             | CliError::UnknownFlag(_)
             | CliError::MissingValue(_)
             | CliError::InvalidIndex(_)
+            | CliError::InvalidSum(_)
             | CliError::EmptyLeaves => 2,
             #[cfg(feature = "merkle_sum")]
             CliError::SumCsv(crate::sum::SumCsvError::Empty) => 2,
@@ -121,9 +151,12 @@ pub fn usage() -> &'static str {
         "    merkle prove [--index] <index> <leaf>...\n",
         "    merkle verify --leaf <data> --root <hex> [--steps <L|R:hex,...>]\n",
         "    merkle sum-build <csv-file>\n",
+        "    merkle sum-prove <csv-file> --account <hex>\n",
+        "    merkle sum-verify <proof-file> --root <hex> --sum <total>\n",
         "    merkle help\n\n",
         "Leaves are UTF-8 strings. Proof steps are comma-separated L:/R: hex tokens.\n",
-        "sum-build reads account_id,amount CSV (32-byte hex id, decimal u128) and needs merkle_sum."
+        "sum-build reads account_id,amount CSV (32-byte hex id, decimal u128) and needs merkle_sum.\n",
+        "sum-prove prints a proof file for one account; sum-verify checks it against the published root and sum."
     )
 }
 
@@ -144,6 +177,8 @@ where
         "prove" => parse_prove(args),
         "verify" => parse_verify(args),
         "sum-build" => parse_sum_build(args),
+        "sum-prove" => parse_sum_prove(args),
+        "sum-verify" => parse_sum_verify(args),
         other => Err(CliError::UnknownCommand(String::from(other))),
     }
 }
@@ -308,6 +343,100 @@ where
     Ok(Command::SumBuild { path })
 }
 
+/// Positional file plus one optional value per requested flag.
+type FileAndFlags = (String, Vec<Option<String>>);
+
+/// Shared parser for `<file> --flag <value>...` sum commands.
+///
+/// Returns the single positional file and the value of each flag in
+/// `flags`, in order, or `None` when help was requested. `--file` is
+/// accepted as an alias for the positional.
+fn parse_file_and_flags<I, S>(
+    args: I,
+    command: &str,
+    flags: &[&'static str],
+) -> Result<Option<FileAndFlags>, CliError>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let mut path = None;
+    let mut values: Vec<Option<String>> = vec![None; flags.len()];
+    let mut args = args.into_iter();
+    'outer: while let Some(arg) = args.next() {
+        let arg = arg.as_ref();
+        if arg == "-h" || arg == "--help" {
+            return Ok(None);
+        }
+        for (slot, flag) in values.iter_mut().zip(flags) {
+            if arg == *flag {
+                let value = args.next().ok_or(CliError::MissingValue(flag))?;
+                *slot = Some(String::from(value.as_ref()));
+                continue 'outer;
+            }
+            if let Some(value) = arg.strip_prefix(*flag).and_then(|v| v.strip_prefix('=')) {
+                *slot = Some(String::from(value));
+                continue 'outer;
+            }
+        }
+        if arg == "--file" {
+            let value = args.next().ok_or(CliError::MissingValue("--file"))?;
+            path = Some(String::from(value.as_ref()));
+            continue;
+        }
+        if arg.starts_with('-') {
+            return Err(CliError::UnknownFlag(String::from(arg)));
+        }
+        if path.is_some() {
+            return Err(CliError::Usage(format!(
+                "unexpected argument {arg:?}; {command} takes one file"
+            )));
+        }
+        path = Some(String::from(arg));
+    }
+    let path = path.ok_or(CliError::MissingValue("<file>"))?;
+    Ok(Some((path, values)))
+}
+
+fn parse_sum_prove<I, S>(args: I) -> Result<Command, CliError>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let (path, values) = match parse_file_and_flags(args, "sum-prove", &["--account"])? {
+        None => return Ok(Command::Help),
+        Some(parsed) => parsed,
+    };
+    let account = values[0]
+        .as_deref()
+        .ok_or(CliError::MissingValue("--account"))?;
+    let account = crate::try_from_hex32(account).map_err(CliError::Hex)?;
+    Ok(Command::SumProve { path, account })
+}
+
+fn parse_sum_verify<I, S>(args: I) -> Result<Command, CliError>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let (path, values) = match parse_file_and_flags(args, "sum-verify", &["--root", "--sum"])? {
+        None => return Ok(Command::Help),
+        Some(parsed) => parsed,
+    };
+    let root = parse_root(
+        values[0]
+            .as_deref()
+            .ok_or(CliError::MissingValue("--root"))?,
+    )?;
+    let raw_sum = values[1]
+        .as_deref()
+        .ok_or(CliError::MissingValue("--sum"))?;
+    let sum = raw_sum
+        .parse::<u128>()
+        .map_err(|_| CliError::InvalidSum(String::from(raw_sum)))?;
+    Ok(Command::SumVerify { path, root, sum })
+}
+
 fn parse_root(raw: &str) -> Result<[u8; 32], CliError> {
     crate::try_from_hex32(raw).map_err(CliError::Hex)
 }
@@ -325,6 +454,8 @@ pub fn run(command: Command) -> Result<String, CliError> {
         Command::Prove { index, leaves } => run_prove(index, &leaves),
         Command::Verify { leaf, root, steps } => run_verify(&leaf, root, &steps),
         Command::SumBuild { path } => run_sum_build(&path),
+        Command::SumProve { path, account } => run_sum_prove(&path, &account),
+        Command::SumVerify { path, root, sum } => run_sum_verify(&path, root, sum),
     }
 }
 
@@ -390,6 +521,60 @@ fn run_sum_build(path: &str) -> Result<String, CliError> {
         let tree = MerkleSumTree::from_leaves(leaves).map_err(CliError::SumOverflow)?;
         let (hash, total) = tree.root().expect("parse_sum_csv rejects empty input");
         Ok(format!("root={}\nsum={total}\n", to_hex32(&hash)))
+    }
+}
+
+#[cfg(feature = "merkle_sum")]
+fn read_file(path: &str) -> Result<String, CliError> {
+    std::fs::read_to_string(path)
+        .map_err(|err| CliError::Io(format!("failed to read {path}: {err}")))
+}
+
+#[cfg(not(feature = "merkle_sum"))]
+fn needs_merkle_sum(command: &str) -> CliError {
+    CliError::Usage(format!("{command} requires the merkle_sum feature"))
+}
+
+fn run_sum_prove(path: &str, account: &[u8; 32]) -> Result<String, CliError> {
+    #[cfg(not(feature = "merkle_sum"))]
+    {
+        let _ = (path, account);
+        Err(needs_merkle_sum("sum-prove"))
+    }
+    #[cfg(feature = "merkle_sum")]
+    {
+        use crate::sum::{parse_sum_csv, sum_proof_to_text, MerkleSumTree};
+
+        let leaves = parse_sum_csv(&read_file(path)?).map_err(CliError::SumCsv)?;
+        let tree = MerkleSumTree::from_leaves(leaves).map_err(CliError::SumOverflow)?;
+        let index = tree
+            .position(account)
+            .ok_or_else(|| CliError::AccountNotFound(crate::to_hex32(account)))?;
+        let proof = tree.prove(index).expect("position is in range");
+        Ok(sum_proof_to_text(&tree.leaves()[index], &proof))
+    }
+}
+
+fn run_sum_verify(path: &str, root: [u8; 32], sum: u128) -> Result<String, CliError> {
+    #[cfg(not(feature = "merkle_sum"))]
+    {
+        let _ = (path, root, sum);
+        Err(needs_merkle_sum("sum-verify"))
+    }
+    #[cfg(feature = "merkle_sum")]
+    {
+        use crate::sum::{parse_sum_proof_text, SumNode};
+
+        let (leaf, proof) =
+            parse_sum_proof_text(&read_file(path)?).map_err(CliError::SumProofText)?;
+        proof
+            .verify(&leaf, &SumNode::new(root, sum))
+            .map_err(CliError::SumProof)?;
+        Ok(format!(
+            "ok\naccount={}\namount={}\n",
+            crate::to_hex32(&leaf.account_id),
+            leaf.amount
+        ))
     }
 }
 
@@ -612,5 +797,131 @@ mod tests {
             assert_eq!(total, 42);
             let _ = std::fs::remove_file(&path);
         }
+    }
+
+    #[test]
+    fn parse_sum_prove_and_verify_flags() {
+        let id = to_hex32(&[7u8; 32]);
+        let root = to_hex32(&[8u8; 32]);
+        assert_eq!(
+            parse_args(args(&["sum-prove", "b.csv", "--account", &id])).unwrap(),
+            Command::SumProve {
+                path: String::from("b.csv"),
+                account: [7u8; 32],
+            }
+        );
+        assert_eq!(
+            parse_args(args(&["sum-prove", &format!("--account={id}"), "b.csv"])).unwrap(),
+            Command::SumProve {
+                path: String::from("b.csv"),
+                account: [7u8; 32],
+            }
+        );
+        assert_eq!(
+            parse_args(args(&["sum-verify", "p.txt", "--root", &root, "--sum=50"])).unwrap(),
+            Command::SumVerify {
+                path: String::from("p.txt"),
+                root: [8u8; 32],
+                sum: 50,
+            }
+        );
+        assert_eq!(
+            parse_args(args(&["sum-prove", "b.csv"])).unwrap_err(),
+            CliError::MissingValue("--account")
+        );
+        assert_eq!(
+            parse_args(args(&["sum-verify", "p.txt", "--root", &root])).unwrap_err(),
+            CliError::MissingValue("--sum")
+        );
+        let err = parse_args(args(&[
+            "sum-verify",
+            "p.txt",
+            "--root",
+            &root,
+            "--sum",
+            "-1",
+        ]))
+        .unwrap_err();
+        assert_eq!(err, CliError::InvalidSum(String::from("-1")));
+        assert_eq!(err.exit_code(), 2);
+        assert!(matches!(
+            parse_args(args(&["sum-prove", "b.csv", "--account", "abcd"])).unwrap_err(),
+            CliError::Hex(_)
+        ));
+        assert!(matches!(
+            parse_args(args(&["sum-prove", "a.csv", "b.csv"])).unwrap_err(),
+            CliError::Usage(_)
+        ));
+        assert!(matches!(
+            parse_args(args(&["sum-verify", "p.txt", "--bogus"])).unwrap_err(),
+            CliError::UnknownFlag(_)
+        ));
+        assert_eq!(
+            parse_args(args(&["sum-verify", "--help"])).unwrap(),
+            Command::Help
+        );
+    }
+
+    #[cfg(feature = "merkle_sum")]
+    #[test]
+    fn sum_prove_then_verify_round_trips_through_files() {
+        let dir = std::env::temp_dir();
+        let csv = dir.join("zk-merkle-unit-sum-prove.csv");
+        let proof_path = dir.join("zk-merkle-unit-sum-prove.txt");
+        let (a, b, c) = (
+            to_hex32(&[1u8; 32]),
+            to_hex32(&[2u8; 32]),
+            to_hex32(&[3u8; 32]),
+        );
+        std::fs::write(&csv, format!("account_id,amount\n{a},40\n{b},2\n{c},8\n")).unwrap();
+
+        let built = run_from_args(args(&["sum-build", csv.to_str().unwrap()])).unwrap();
+        let root = built
+            .lines()
+            .next()
+            .unwrap()
+            .trim_start_matches("root=")
+            .to_string();
+        let proof =
+            run_from_args(args(&["sum-prove", csv.to_str().unwrap(), "--account", &b])).unwrap();
+        assert!(proof.starts_with(&format!("account={b}\namount=2\nindex=1\nleaf_count=3\n")));
+        std::fs::write(&proof_path, &proof).unwrap();
+
+        let p = proof_path.to_str().unwrap();
+        let ok = run_from_args(args(&["sum-verify", p, "--root", &root, "--sum", "50"])).unwrap();
+        assert_eq!(ok, format!("ok\naccount={b}\namount=2\n"));
+
+        // A lower published total is caught even though the hash matches.
+        let err =
+            run_from_args(args(&["sum-verify", p, "--root", &root, "--sum", "49"])).unwrap_err();
+        assert!(matches!(
+            err,
+            CliError::SumProof(crate::sum::SumProofError::SumMismatch { .. })
+        ));
+        assert_eq!(err.exit_code(), 1);
+
+        let missing = to_hex32(&[9u8; 32]);
+        let err = run_from_args(args(&[
+            "sum-prove",
+            csv.to_str().unwrap(),
+            "--account",
+            &missing,
+        ]))
+        .unwrap_err();
+        assert_eq!(err, CliError::AccountNotFound(missing));
+
+        let _ = std::fs::remove_file(&csv);
+        let _ = std::fs::remove_file(&proof_path);
+    }
+
+    #[cfg(not(feature = "merkle_sum"))]
+    #[test]
+    fn sum_prove_and_verify_explain_the_feature() {
+        let id = to_hex32(&[1u8; 32]);
+        let err = run_from_args(args(&["sum-prove", "x.csv", "--account", &id])).unwrap_err();
+        assert!(err.to_string().contains("merkle_sum"));
+        let err =
+            run_from_args(args(&["sum-verify", "p.txt", "--root", &id, "--sum", "1"])).unwrap_err();
+        assert!(err.to_string().contains("merkle_sum"));
     }
 }
