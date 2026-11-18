@@ -348,6 +348,21 @@ impl MerkleSumTree {
     pub fn leaves(&self) -> &[SumLeaf] {
         &self.leaves
     }
+
+    /// Number of stored layers, including the leaf layer and the root.
+    ///
+    /// Empty trees have zero layers.
+    pub fn layer_count(&self) -> usize {
+        self.layers.len()
+    }
+
+    /// Borrow the nodes of layer `level` (0 = leaves). `None` if out of range.
+    ///
+    /// Each node's `sum` is the total of the leaves beneath it. An odd leftover
+    /// is promoted unchanged, so a parent never double-counts an amount.
+    pub fn layer_nodes(&self, level: usize) -> Option<&[SumNode]> {
+        self.layers.get(level).map(Vec::as_slice)
+    }
 }
 
 /// Which sibling side each step of a proof for `index` must have, in a tree
@@ -882,6 +897,8 @@ mod tests {
         assert_eq!(tree.root(), None);
         assert_eq!(tree.root_node(), None);
         assert!(tree.leaves().is_empty());
+        assert_eq!(tree.layer_count(), 0);
+        assert_eq!(tree.layer_nodes(0), None);
     }
 
     #[test]
@@ -892,6 +909,9 @@ mod tests {
         assert_eq!(tree.root(), Some((leaf.hash(), 99)));
         assert_eq!(tree.root_node(), Some(leaf.node()));
         assert_eq!(tree.leaves(), &[leaf]);
+        assert_eq!(tree.layer_count(), 1);
+        assert_eq!(tree.layer_nodes(0), Some(&[leaf.node()][..]));
+        assert_eq!(tree.layer_nodes(1), None);
     }
 
     #[test]
@@ -901,6 +921,9 @@ mod tests {
         let tree = MerkleSumTree::from_leaves([a, b]).expect("fits");
         let parent = SumNode::parent(&a.node(), &b.node()).expect("fits");
         assert_eq!(tree.root(), Some((parent.hash, 42)));
+        assert_eq!(tree.layer_count(), 2);
+        assert_eq!(tree.layer_nodes(0), Some(&[a.node(), b.node()][..]));
+        assert_eq!(tree.layer_nodes(1), Some(&[parent][..]));
     }
 
     #[test]
