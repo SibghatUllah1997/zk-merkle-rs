@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-19 (solvency check)
+
+- `solvency::compare_liabilities` rebuilds the sum tree from an auditor's own balance snapshot and compares it with the published root and total
+- The report flags an understated or overstated total, a root mismatch with equal totals, duplicate account ids, and an optional reserves shortfall
+- `merkle solvency <csv> --root <hex> --sum <total> [--reserves <amount>]` prints the report and exits 1 on any mismatch
+
 ## 2026-11-19 (zk-range)
 
 - Add a `zk-range` feature with a Halo 2 circuit that proves `0 <= amount < 2^64`
