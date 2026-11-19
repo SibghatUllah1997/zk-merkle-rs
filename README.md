@@ -21,7 +21,7 @@ Fast, tiny, no_std-friendly SHA-256 Merkle tree with inclusion proofs and a clea
 - serde support: optional `serde` derive on proof/root types, including Merkle sum leaves, roots, and proofs
 - no_std: works without `std` (uses `alloc`) via feature flags
 - BLAKE3: the `blake3` feature adds `BLAKE3(0x00 || data)` / `BLAKE3(0x01 || l || r)` trees via `MerkleTree::try_from_leaves_with(HashAlgorithm::Blake3, ..)` and `verify_with`
-- Merkle sum tree: the `merkle_sum` feature adds `MerkleSumTree::from_leaves`, `root() -> (hash, total)`, inclusion proofs, and `parse_sum_csv` / `merkle sum-build` for account-amount CSV, `merkle sum-prove` / `sum-verify` for per-account proofs, built on `SumLeaf` / `SumNode` with `SHA-256(0x30 || id || amount)` leaves and sum-committing `0x31` parents
+- Merkle sum tree: the `merkle_sum` feature adds `MerkleSumTree::from_leaves`, `root() -> (hash, total)`, inclusion proofs, and `parse_sum_csv` / `merkle sum-build` for account-amount CSV, `merkle sum-prove` / `sum-verify` for per-account proofs, `merkle solvency` to compare a published root and total with your own liabilities snapshot, built on `SumLeaf` / `SumNode` with `SHA-256(0x30 || id || amount)` leaves and sum-committing `0x31` parents
 - Range proofs: the `zk-range` feature adds a Halo 2 circuit that proves `0 <= amount < 2^64`, with `generate_range_proof` / `verify_range_proof`
 - Poseidon: the `poseidon` feature hashes with circom-compatible BN254 Poseidon (`0x10`/`0x11` domain tags) via `try_from_leaves_with(HashAlgorithm::Poseidon, ..)`
 - Hash placeholder: the `rescue` feature still returns `HashNotImplemented`
@@ -60,9 +60,10 @@ cargo run --bin merkle -- verify --leaf c --root <root-hex> --steps <L|R:hex,...
 cargo run --features merkle_sum --bin merkle -- sum-build balances.csv
 cargo run --features merkle_sum --bin merkle -- sum-prove balances.csv --account <id-hex> > proof.txt
 cargo run --features merkle_sum --bin merkle -- sum-verify proof.txt --root <root-hex> --sum <total>
+cargo run --features merkle_sum --bin merkle -- solvency liabilities.csv --root <root-hex> --sum <total> --reserves <amount>
 ```
 
-`build` prints a 64-character lowercase hex root. `prove` prints `root`, `index`, `leaf_hash`, and compact `steps` that `verify` consumes. `sum-build` (needs `merkle_sum`) reads `account_id,amount` CSV and prints `root` and `sum`. `sum-prove` exports one account's proof as `key=value` lines, and `sum-verify` checks that file against the published root and total.
+`build` prints a 64-character lowercase hex root. `prove` prints `root`, `index`, `leaf_hash`, and compact `steps` that `verify` consumes. `sum-build` (needs `merkle_sum`) reads `account_id,amount` CSV and prints `root` and `sum`. `sum-prove` exports one account's proof as `key=value` lines, and `sum-verify` checks that file against the published root and total. `solvency` rebuilds the tree from an independent liabilities CSV and reports total, root, duplicate-id, and reserve-coverage results; any mismatch exits 1.
 
 ### Examples
 Chunk a file (or a bundled sample) into leaves and prove the last chunk:

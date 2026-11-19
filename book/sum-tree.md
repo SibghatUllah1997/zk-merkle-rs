@@ -172,3 +172,25 @@ total the exchange published, so a proof file cannot vouch for itself.
 feature additionally proves `0 <= amount < 2^64` with a Halo 2 circuit, so a
 published balance cannot hide a wrap by using more than 64 bits. See
 [Range proofs](range.md).
+
+## Checking a published total
+
+`merkle_tree::solvency::compare_liabilities` takes the published
+`(hash, total)` and an auditor's own export of balances. It rebuilds the sum
+tree and reports:
+
+- `total`: `match`, `understated by N` (liabilities hidden), or
+  `overstated by N`
+- `root`: whether the rebuilt hash equals the published one. Equal totals
+  with a different hash mean balances moved between accounts or the order
+  differs
+- duplicate account ids, which would count one balance twice
+- with `--reserves`, the shortfall of reserves against the *snapshot* total,
+  not the published one
+
+```text
+merkle solvency liabilities.csv --root <hex> --sum <total> --reserves <amount>
+```
+
+The root depends on leaf order, so the snapshot must use the publisher's
+order. The command exits 1 and prints the report to stderr on any mismatch.
