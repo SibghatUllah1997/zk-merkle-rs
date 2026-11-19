@@ -24,6 +24,7 @@ ff = { version = "0.13", default-features = false, optional = true }
 # halo2_proofs asks for blake2b_simd 1, which would otherwise resolve to an
 # edition-2024 release. Pin a 2021-edition crate so older Cargo can parse it.
 blake2b_simd = { version = "=1.0.2", optional = true }
+rand = { version = "0.8", optional = true }
 
 [dev-dependencies]
 proptest = { version = "=1.5.0", default-features = false, features = ["std"] }
@@ -84,4 +85,4 @@ blake3 = ["dep:blake3"]
 ## Merkle sum tree types for proof of reserves (SHA-256, no extra deps).
 merkle_sum = []
 ## 64-bit range-check circuit (`0 <= amount < 2^64`) via halo2_proofs.
-zk-range = ["std", "dep:halo2_proofs", "dep:ff", "dep:blake2b_simd"]
+zk-range = ["std", "dep:halo2_proofs", "dep:ff", "dep:blake2b_simd", "dep:rand"]

@@ -121,7 +121,10 @@ pub use proof::{
     IndexedInclusionProof, MultiProof, ProofStep, SiblingSide,
 };
 #[cfg(feature = "zk-range")]
-pub use range::{amount_in_range, RangeCheckCircuit, RANGE_BITS, RANGE_K, RANGE_MAX};
+pub use range::{
+    amount_in_range, generate_range_proof, verify_range_proof, RangeCheckCircuit, RangeProof,
+    RangeProofError, RANGE_BITS, RANGE_K, RANGE_MAX,
+};
 #[cfg(feature = "merkle_sum")]
 pub use sum::{
     parse_sum_csv, parse_sum_proof_text, sum_proof_to_text, AccountId, MerkleSumTree, SumCsvError,

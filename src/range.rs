@@ -7,16 +7,23 @@
 //! Each of the 64 little-endian bits is constrained to `{0, 1}`. A running
 //! sum reconstructs `sum_i bit_i * 2^i` and is copy-constrained to a public
 //! instance, so a verifier who knows `amount` can check it is a 64-bit value.
+//! [`generate_range_proof`] and [`verify_range_proof`] wrap Halo 2 proving.
+
+use std::sync::Mutex;
 
 use ff::Field;
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, SimpleFloorPlanner, Value},
-    pasta::Fp,
+    pasta::{EqAffine, Fp},
     plonk::{
-        Advice, Circuit, Column, ConstraintSystem, Error, Expression, Fixed, Instance, Selector,
+        create_proof, keygen_pk, keygen_vk, verify_proof, Advice, Circuit, Column,
+        ConstraintSystem, Error, Expression, Fixed, Instance, ProvingKey, Selector, SingleVerifier,
     },
-    poly::Rotation,
+    poly::{commitment::Params, Rotation},
+    transcript::{Blake2bRead, Blake2bWrite, Challenge255},
 };
+use rand::rngs::StdRng;
+use rand::SeedableRng;
 
 /// Width of the range check, in bits. Amounts must satisfy `0 <= a < 2^64`.
 pub const RANGE_BITS: usize = 64;
@@ -193,6 +200,117 @@ impl Circuit<Fp> for RangeCheckCircuit {
     }
 }
 
+/// Seed for the prover RNG.
+///
+/// The amount is a public instance, so the proof is not hiding it. A fixed
+/// seed makes [`generate_range_proof`] deterministic for test vectors.
+pub const PROOF_RNG_SEED: [u8; 32] = [7u8; 32];
+
+/// Serialized Halo 2 proof that `amount` fits in 64 bits.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RangeProof {
+    /// Transcript bytes from `halo2_proofs::create_proof`.
+    pub bytes: Vec<u8>,
+}
+
+impl RangeProof {
+    /// Wrap already-serialized proof bytes.
+    pub const fn from_bytes(bytes: Vec<u8>) -> Self {
+        Self { bytes }
+    }
+}
+
+/// Why [`generate_range_proof`] or [`verify_range_proof`] failed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RangeProofError {
+    /// `amount` is `2^64` or larger.
+    OutOfRange {
+        /// The amount that did not fit.
+        amount: u128,
+    },
+    /// Halo 2 proving failed.
+    Prove,
+    /// The proof did not verify for this amount.
+    Verify,
+}
+
+impl core::fmt::Display for RangeProofError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            RangeProofError::OutOfRange { amount } => {
+                write!(f, "amount {amount} is outside 0..2^64")
+            }
+            RangeProofError::Prove => write!(f, "range-proof proving failed"),
+            RangeProofError::Verify => write!(f, "range-proof verification failed"),
+        }
+    }
+}
+
+impl std::error::Error for RangeProofError {}
+
+struct Artifacts {
+    params: Params<EqAffine>,
+    pk: ProvingKey<EqAffine>,
+}
+
+fn artifacts() -> &'static Artifacts {
+    static CELL: Mutex<Option<&'static Artifacts>> = Mutex::new(None);
+    let mut guard = CELL.lock().expect("range-check keys");
+    if guard.is_none() {
+        let params = Params::new(RANGE_K);
+        let empty = RangeCheckCircuit::empty();
+        let vk = keygen_vk(&params, &empty).expect("range-check keygen_vk");
+        let pk = keygen_pk(&params, vk, &empty).expect("range-check keygen_pk");
+        *guard = Some(Box::leak(Box::new(Artifacts { params, pk })));
+    }
+    guard.expect("initialized")
+}
+
+/// Prove that `amount` satisfies `0 <= amount < 2^64`.
+///
+/// ```
+/// use merkle_tree::range::{generate_range_proof, verify_range_proof};
+///
+/// let proof = generate_range_proof(42).expect("fits");
+/// assert!(verify_range_proof(42, &proof).is_ok());
+/// assert!(generate_range_proof(1u128 << 64).is_err());
+/// ```
+pub fn generate_range_proof(amount: u128) -> Result<RangeProof, RangeProofError> {
+    let amount_u64 = u64::try_from(amount).map_err(|_| RangeProofError::OutOfRange { amount })?;
+    let circuit = RangeCheckCircuit::new(amount_u64);
+    let keys = artifacts();
+    let mut rng = StdRng::from_seed(PROOF_RNG_SEED);
+    let mut transcript = Blake2bWrite::<_, _, Challenge255<_>>::init(Vec::new());
+    let instance = Fp::from(amount_u64);
+    create_proof(
+        &keys.params,
+        &keys.pk,
+        &[circuit],
+        &[&[&[instance]]],
+        &mut rng,
+        &mut transcript,
+    )
+    .map_err(|_| RangeProofError::Prove)?;
+    Ok(RangeProof::from_bytes(transcript.finalize()))
+}
+
+/// Check a proof from [`generate_range_proof`] against a public `amount`.
+pub fn verify_range_proof(amount: u128, proof: &RangeProof) -> Result<(), RangeProofError> {
+    let amount_u64 = u64::try_from(amount).map_err(|_| RangeProofError::OutOfRange { amount })?;
+    let keys = artifacts();
+    let strategy = SingleVerifier::new(&keys.params);
+    let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(proof.bytes.as_slice());
+    let instance = Fp::from(amount_u64);
+    verify_proof(
+        &keys.params,
+        keys.pk.get_vk(),
+        strategy,
+        &[&[&[instance]]],
+        &mut transcript,
+    )
+    .map_err(|_| RangeProofError::Verify)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -277,5 +395,52 @@ mod tests {
         let swapped = MockProver::run(RANGE_K, &circuit, RangeCheckCircuit::instance(u64::MAX))
             .expect("rows");
         assert!(swapped.verify().is_err());
+    }
+
+    #[test]
+    fn generate_and_verify_round_trip() {
+        for amount in [0u128, 1, 42, u64::MAX as u128] {
+            let proof = generate_range_proof(amount).expect("fits");
+            assert!(!proof.bytes.is_empty());
+            assert_eq!(verify_range_proof(amount, &proof), Ok(()));
+        }
+    }
+
+    #[test]
+    fn generate_rejects_amounts_outside_64_bits() {
+        let amount = RANGE_MAX + 1;
+        assert_eq!(
+            generate_range_proof(amount),
+            Err(RangeProofError::OutOfRange { amount })
+        );
+        assert_eq!(
+            verify_range_proof(amount, &RangeProof::from_bytes(Vec::new())),
+            Err(RangeProofError::OutOfRange { amount })
+        );
+    }
+
+    #[test]
+    fn verify_rejects_a_wrong_amount_or_a_tampered_proof() {
+        let proof = generate_range_proof(42).expect("fits");
+        assert_eq!(verify_range_proof(43, &proof), Err(RangeProofError::Verify));
+
+        let mut mangled = proof.clone();
+        let last = mangled.bytes.last_mut().expect("non-empty");
+        *last ^= 0xff;
+        assert_eq!(
+            verify_range_proof(42, &mangled),
+            Err(RangeProofError::Verify)
+        );
+        assert_eq!(
+            verify_range_proof(42, &RangeProof::from_bytes(Vec::new())),
+            Err(RangeProofError::Verify)
+        );
+    }
+
+    #[test]
+    fn generate_is_deterministic_for_the_fixed_seed() {
+        let a = generate_range_proof(42).expect("fits");
+        let b = generate_range_proof(42).expect("fits");
+        assert_eq!(a, b);
     }
 }

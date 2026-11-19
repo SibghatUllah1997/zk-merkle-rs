@@ -1,7 +1,10 @@
 //! Public API tests for the `zk-range` bitness circuit.
 #![cfg(feature = "zk-range")]
 
-use merkle_tree::{amount_in_range, features, RangeCheckCircuit, RANGE_BITS, RANGE_MAX};
+use merkle_tree::{
+    amount_in_range, features, generate_range_proof, verify_range_proof, RangeCheckCircuit,
+    RangeProofError, RANGE_BITS, RANGE_MAX,
+};
 
 #[test]
 fn feature_flag_is_on() {
@@ -33,4 +36,20 @@ fn public_instance_has_one_field_element() {
     let instance = RangeCheckCircuit::instance(123456789);
     assert_eq!(instance.len(), 1);
     assert_eq!(instance[0].len(), 1);
+}
+
+#[test]
+fn generate_range_proof_verifies_and_rejects_out_of_range() {
+    let proof = generate_range_proof(99).expect("fits");
+    assert!(verify_range_proof(99, &proof).is_ok());
+    assert_eq!(
+        generate_range_proof(1u128 << 64),
+        Err(RangeProofError::OutOfRange {
+            amount: 1u128 << 64
+        })
+    );
+    assert_eq!(
+        verify_range_proof(100, &proof),
+        Err(RangeProofError::Verify)
+    );
 }
