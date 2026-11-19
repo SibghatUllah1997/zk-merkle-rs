@@ -19,6 +19,9 @@ pub const POSEIDON: bool = cfg!(feature = "poseidon");
 /// Merkle sum tree types for proof of reserves.
 pub const MERKLE_SUM: bool = cfg!(feature = "merkle_sum");
 
+/// 64-bit range-check circuit in `halo2_proofs`.
+pub const ZK_RANGE: bool = cfg!(feature = "zk-range");
+
 /// Rescue placeholder API (`HashNotImplemented`).
 pub const RESCUE: bool = cfg!(feature = "rescue");
 
@@ -40,6 +43,8 @@ pub fn enabled() -> &'static [&'static str] {
         "rescue",
         #[cfg(feature = "merkle_sum")]
         "merkle_sum",
+        #[cfg(feature = "zk-range")]
+        "zk-range",
     ]
 }
 
@@ -55,6 +60,7 @@ mod tests {
         assert_eq!(enabled().contains(&"poseidon"), POSEIDON);
         assert_eq!(enabled().contains(&"rescue"), RESCUE);
         assert_eq!(enabled().contains(&"merkle_sum"), MERKLE_SUM);
+        assert_eq!(enabled().contains(&"zk-range"), ZK_RANGE);
         assert_eq!(STD, cfg!(feature = "std"));
         assert_eq!(BLAKE3, cfg!(feature = "blake3"));
         assert_eq!(POSEIDON, cfg!(feature = "poseidon"));

@@ -19,6 +19,7 @@ blake3 = { version = "1.5", default-features = false, optional = true }
 light-poseidon-nostd = { version = "0.4.1", default-features = false, optional = true }
 ark-bn254 = { version = "0.5", default-features = false, features = ["curve"], optional = true }
 ark-ff = { version = "0.5", default-features = false, optional = true }
+halo2_proofs = { version = "0.3", default-features = false, optional = true }
 
 [dev-dependencies]
 proptest = { version = "=1.5.0", default-features = false, features = ["std"] }
@@ -73,3 +74,5 @@ rescue = []
 blake3 = ["dep:blake3"]
 ## Merkle sum tree types for proof of reserves (SHA-256, no extra deps).
 merkle_sum = []
+## 64-bit range-check circuit (`0 <= amount < 2^64`) in the audited `halo2_proofs` crate.
+zk-range = ["std", "dep:halo2_proofs"]

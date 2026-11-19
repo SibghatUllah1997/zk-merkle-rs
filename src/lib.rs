@@ -57,6 +57,7 @@
 //! - [`log`] — append-only log with successive Merkle-root checkpoints
 //! - [`features`] — which optional crate features this build compiled with
 //! - `sum` (feature `merkle_sum`) — Merkle sum tree, inclusion proofs, CSV leaves, layer totals, and serde-ready roots
+//! - `range` (feature `zk-range`) — halo2 circuit proving an amount fits in 64 bits
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
@@ -85,6 +86,8 @@ pub mod log;
 /// Inclusion proofs, compact L/R step encoding, and multi-leaf proofs.
 pub mod proof;
 /// Merkle sum tree, inclusion proofs, and CSV helpers for proof of reserves.
+#[cfg(feature = "zk-range")]
+pub mod range;
 #[cfg(feature = "merkle_sum")]
 pub mod sum;
 /// Merkle tree construction, typed roots, and leaf metadata.
