@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-19 (zk-range circuit)
+
+- New `zk-range` feature: `RangeCheckCircuit` proves a public amount satisfies `0 <= amount < 2^64`, built on the audited `halo2_proofs` crate
+- The amount is split into 64 bits; one gate checks each bit is 0 or 1 and folds it into an accumulator that must equal the public input
+- MockProver tests cover edge values, amounts at or above `2^64`, wrong public inputs, and a non-boolean bit that still sums correctly
+
 ## 2026-11-18 (sum-tree properties)
 
 - Property tests check that every subtree sum equals the folded leaf amounts

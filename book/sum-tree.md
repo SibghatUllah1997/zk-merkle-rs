@@ -166,8 +166,29 @@ whether the hash or the total did not match.
 The proof file does not carry the root. The user should pass the root and
 total the exchange published, so a proof file cannot vouch for itself.
 
+## 64-bit range circuit
+
+The `zk-range` feature adds `merkle_tree::range::RangeCheckCircuit`, written
+with the audited `halo2_proofs` crate. It proves that a public amount is in
+`0 <= amount < 2^64`.
+
+The amount is split into 64 bits, most significant first. Each row checks
+that its bit is 0 or 1 and that `acc = 2 * previous_acc + bit`. The
+accumulator starts at a fixed zero and, after 64 rows, is copied to the
+public input. Sixty-four bits cannot exceed `2^64 - 1`, which is far below the
+field size, so the sum cannot wrap around.
+
+```rust,ignore
+use halo2_proofs::dev::MockProver;
+use merkle_tree::range::{RangeCheckCircuit, RANGE_CIRCUIT_K};
+
+let circuit = RangeCheckCircuit::new(1_000_000);
+let prover = MockProver::run(RANGE_CIRCUIT_K, &circuit, vec![circuit.public_inputs()])?;
+assert!(prover.verify().is_ok());
+```
+
 ## What is not here yet
 
-Range proofs for non-negative balances come in later roadmap steps. `u128`
-already rules out negative amounts in the leaf encoding; the range proof will
-let a user check that without seeing other balances.
+The circuit is checked with `MockProver` only. Generating and verifying real
+proofs, and keeping the amount hidden behind the leaf commitment, come in
+later roadmap steps.

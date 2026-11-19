@@ -22,6 +22,7 @@ Fast, tiny, no_std-friendly SHA-256 Merkle tree with inclusion proofs and a clea
 - no_std: works without `std` (uses `alloc`) via feature flags
 - BLAKE3: the `blake3` feature adds `BLAKE3(0x00 || data)` / `BLAKE3(0x01 || l || r)` trees via `MerkleTree::try_from_leaves_with(HashAlgorithm::Blake3, ..)` and `verify_with`
 - Merkle sum tree: the `merkle_sum` feature adds `MerkleSumTree::from_leaves`, `root() -> (hash, total)`, inclusion proofs, and `parse_sum_csv` / `merkle sum-build` for account-amount CSV, `merkle sum-prove` / `sum-verify` for per-account proofs, built on `SumLeaf` / `SumNode` with `SHA-256(0x30 || id || amount)` leaves and sum-committing `0x31` parents
+- Range check: the `zk-range` feature adds `range::RangeCheckCircuit`, a `halo2_proofs` circuit that proves an amount fits in 64 bits (checked with `MockProver`; real proof helpers come next)
 - Poseidon: the `poseidon` feature hashes with circom-compatible BN254 Poseidon (`0x10`/`0x11` domain tags) via `try_from_leaves_with(HashAlgorithm::Poseidon, ..)`
 - Hash placeholder: the `rescue` feature still returns `HashNotImplemented`
 - Chunking: split buffers or `Read` streams into fixed-size leaves (`chunk_bytes`, `chunk_reader`)
