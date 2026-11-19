@@ -173,3 +173,72 @@ fn help_mentions_sum_prove_and_verify() {
     assert!(text.contains("merkle sum-prove"));
     assert!(text.contains("merkle sum-verify"));
 }
+
+/// Root and total that `sum-build` prints for `write_balances` (sum 1500).
+fn balances_root() -> String {
+    let tree =
+        MerkleSumTree::from_leaves((1u8..=5).map(|i| SumLeaf::new([i; 32], u128::from(i) * 100)))
+            .unwrap();
+    to_hex32(&tree.root().unwrap().0)
+}
+
+#[test]
+fn solvency_matching_snapshot_with_reserves_exits_zero() {
+    let csv = write_balances("zk-merkle-cli-solvency-ok.csv");
+    let out = merkle()
+        .args(["solvency", csv.to_str().unwrap()])
+        .args([
+            "--root",
+            &balances_root(),
+            "--sum",
+            "1500",
+            "--reserves",
+            "2000",
+        ])
+        .output()
+        .expect("run merkle");
+    let _ = std::fs::remove_file(&csv);
+    assert!(
+        out.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(text.starts_with("status=ok\naccounts=5\npublished_sum=1500\ncomputed_sum=1500\n"));
+    assert!(text.ends_with("duplicates=0\nreserves=2000\nreserve_shortfall=0\n"));
+}
+
+#[test]
+fn solvency_understated_total_exits_one() {
+    let csv = write_balances("zk-merkle-cli-solvency-under.csv");
+    let out = merkle()
+        .args(["solvency", csv.to_str().unwrap()])
+        .args(["--root", &balances_root(), "--sum", "1400"])
+        .output()
+        .expect("run merkle");
+    let _ = std::fs::remove_file(&csv);
+    assert_eq!(out.status.code(), Some(1));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("status=mismatch"));
+    assert!(err.contains("total=understated by 100"));
+    assert!(err.contains("root=match"));
+}
+
+#[test]
+fn solvency_flags_duplicate_accounts() {
+    let path = std::env::temp_dir().join("zk-merkle-cli-solvency-dup.csv");
+    let id = to_hex32(&[1u8; 32]);
+    std::fs::write(&path, format!("{id},10\n{id},10\n")).unwrap();
+    let tree =
+        MerkleSumTree::from_leaves([SumLeaf::new([1; 32], 10), SumLeaf::new([1; 32], 10)]).unwrap();
+    let out = merkle()
+        .args(["solvency", path.to_str().unwrap()])
+        .args(["--root", &to_hex32(&tree.root().unwrap().0), "--sum", "20"])
+        .output()
+        .expect("run merkle");
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(out.status.code(), Some(1));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("root=match"));
+    assert!(err.contains(&format!("duplicates=1\nduplicate={id}")));
+}

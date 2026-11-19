@@ -38,6 +38,13 @@ pub enum Command {
         root: [u8; 32],
         sum: u128,
     },
+    /// Compare a published root and total with a liabilities snapshot CSV.
+    Solvency {
+        path: String,
+        root: [u8; 32],
+        sum: u128,
+        reserves: Option<u128>,
+    },
 }
 
 /// Recoverable CLI failure, including usage requests that should print help.
@@ -60,6 +67,8 @@ pub enum CliError {
     Io(String),
     InvalidSum(String),
     AccountNotFound(String),
+    /// The solvency report found a mismatch; the payload is the full report.
+    SolvencyMismatch(String),
     #[cfg(feature = "merkle_sum")]
     SumProof(crate::sum::SumProofError),
     #[cfg(feature = "merkle_sum")]
@@ -93,6 +102,7 @@ impl std::fmt::Display for CliError {
                 write!(f, "invalid total {raw:?}; expected a decimal u128")
             }
             CliError::AccountNotFound(id) => write!(f, "account {id} is not in the CSV"),
+            CliError::SolvencyMismatch(report) => write!(f, "{}", report.trim_end()),
             #[cfg(feature = "merkle_sum")]
             CliError::SumProof(err) => write!(f, "verification failed: {err}"),
             #[cfg(feature = "merkle_sum")]
@@ -153,10 +163,12 @@ pub fn usage() -> &'static str {
         "    merkle sum-build <csv-file>\n",
         "    merkle sum-prove <csv-file> --account <hex>\n",
         "    merkle sum-verify <proof-file> --root <hex> --sum <total>\n",
+        "    merkle solvency <csv-file> --root <hex> --sum <total> [--reserves <amount>]\n",
         "    merkle help\n\n",
         "Leaves are UTF-8 strings. Proof steps are comma-separated L:/R: hex tokens.\n",
         "sum-build reads account_id,amount CSV (32-byte hex id, decimal u128) and needs merkle_sum.\n",
-        "sum-prove prints a proof file for one account; sum-verify checks it against the published root and sum."
+        "sum-prove prints a proof file for one account; sum-verify checks it against the published root and sum.\n",
+        "solvency rebuilds the tree from your own liabilities CSV and compares it with the published root and sum."
     )
 }
 
@@ -179,6 +191,7 @@ where
         "sum-build" => parse_sum_build(args),
         "sum-prove" => parse_sum_prove(args),
         "sum-verify" => parse_sum_verify(args),
+        "solvency" => parse_solvency(args),
         other => Err(CliError::UnknownCommand(String::from(other))),
     }
 }
@@ -437,6 +450,40 @@ where
     Ok(Command::SumVerify { path, root, sum })
 }
 
+fn parse_amount(raw: &str) -> Result<u128, CliError> {
+    raw.parse::<u128>()
+        .map_err(|_| CliError::InvalidSum(String::from(raw)))
+}
+
+fn parse_solvency<I, S>(args: I) -> Result<Command, CliError>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let flags = ["--root", "--sum", "--reserves"];
+    let (path, values) = match parse_file_and_flags(args, "solvency", &flags)? {
+        None => return Ok(Command::Help),
+        Some(parsed) => parsed,
+    };
+    let root = parse_root(
+        values[0]
+            .as_deref()
+            .ok_or(CliError::MissingValue("--root"))?,
+    )?;
+    let sum = parse_amount(
+        values[1]
+            .as_deref()
+            .ok_or(CliError::MissingValue("--sum"))?,
+    )?;
+    let reserves = values[2].as_deref().map(parse_amount).transpose()?;
+    Ok(Command::Solvency {
+        path,
+        root,
+        sum,
+        reserves,
+    })
+}
+
 fn parse_root(raw: &str) -> Result<[u8; 32], CliError> {
     crate::try_from_hex32(raw).map_err(CliError::Hex)
 }
@@ -456,6 +503,12 @@ pub fn run(command: Command) -> Result<String, CliError> {
         Command::SumBuild { path } => run_sum_build(&path),
         Command::SumProve { path, account } => run_sum_prove(&path, &account),
         Command::SumVerify { path, root, sum } => run_sum_verify(&path, root, sum),
+        Command::Solvency {
+            path,
+            root,
+            sum,
+            reserves,
+        } => run_solvency(&path, root, sum, reserves),
     }
 }
 
@@ -575,6 +628,74 @@ fn run_sum_verify(path: &str, root: [u8; 32], sum: u128) -> Result<String, CliEr
             crate::to_hex32(&leaf.account_id),
             leaf.amount
         ))
+    }
+}
+
+fn run_solvency(
+    path: &str,
+    root: [u8; 32],
+    sum: u128,
+    reserves: Option<u128>,
+) -> Result<String, CliError> {
+    #[cfg(not(feature = "merkle_sum"))]
+    {
+        let _ = (path, root, sum, reserves);
+        Err(needs_merkle_sum("solvency"))
+    }
+    #[cfg(feature = "merkle_sum")]
+    {
+        use crate::solvency::{compare_liabilities, SolvencyError, TotalStatus};
+        use crate::sum::{parse_sum_csv, SumNode};
+        use std::fmt::Write;
+
+        let leaves = parse_sum_csv(&read_file(path)?).map_err(CliError::SumCsv)?;
+        let mut report =
+            compare_liabilities(&SumNode::new(root, sum), &leaves).map_err(|err| match err {
+                SolvencyError::Overflow(o) => CliError::SumOverflow(o),
+                SolvencyError::EmptySnapshot => CliError::SumCsv(crate::sum::SumCsvError::Empty),
+            })?;
+        if let Some(r) = reserves {
+            report = report.with_reserves(r);
+        }
+
+        let short = report.reserve_shortfall().unwrap_or(0);
+        let ok = report.is_consistent() && short == 0;
+        let total = match report.total_status() {
+            TotalStatus::Match => String::from("match"),
+            TotalStatus::Understated { by } => format!("understated by {by}"),
+            TotalStatus::Overstated { by } => format!("overstated by {by}"),
+        };
+        let mut out = String::new();
+        // Writing to a String cannot fail.
+        let _ = writeln!(out, "status={}", if ok { "ok" } else { "mismatch" });
+        let _ = writeln!(out, "accounts={}", report.accounts());
+        let _ = writeln!(out, "published_sum={sum}");
+        let _ = writeln!(out, "computed_sum={}", report.computed().sum);
+        let _ = writeln!(out, "total={total}");
+        let root_state = if report.root_matches() {
+            "match"
+        } else {
+            "mismatch"
+        };
+        let _ = writeln!(out, "root={root_state}");
+        let _ = writeln!(
+            out,
+            "computed_root={}",
+            crate::to_hex32(&report.computed().hash)
+        );
+        let _ = writeln!(out, "duplicates={}", report.duplicates().len());
+        for id in report.duplicates() {
+            let _ = writeln!(out, "duplicate={}", crate::to_hex32(id));
+        }
+        if let Some(r) = report.reserves() {
+            let _ = writeln!(out, "reserves={r}");
+            let _ = writeln!(out, "reserve_shortfall={short}");
+        }
+        if ok {
+            Ok(out)
+        } else {
+            Err(CliError::SolvencyMismatch(out))
+        }
     }
 }
 
@@ -922,6 +1043,106 @@ mod tests {
         assert!(err.to_string().contains("merkle_sum"));
         let err =
             run_from_args(args(&["sum-verify", "p.txt", "--root", &id, "--sum", "1"])).unwrap_err();
+        assert!(err.to_string().contains("merkle_sum"));
+    }
+
+    #[test]
+    fn parse_solvency_flags() {
+        let root = to_hex32(&[7u8; 32]);
+        assert_eq!(
+            parse_args(args(&["solvency", "l.csv", "--root", &root, "--sum=50"])).unwrap(),
+            Command::Solvency {
+                path: String::from("l.csv"),
+                root: [7u8; 32],
+                sum: 50,
+                reserves: None,
+            }
+        );
+        assert_eq!(
+            parse_args(args(&[
+                "solvency",
+                "--reserves",
+                "60",
+                "l.csv",
+                &format!("--root={root}"),
+                "--sum",
+                "50",
+            ]))
+            .unwrap(),
+            Command::Solvency {
+                path: String::from("l.csv"),
+                root: [7u8; 32],
+                sum: 50,
+                reserves: Some(60),
+            }
+        );
+        assert!(matches!(
+            parse_args(args(&["solvency", "l.csv", "--root", &root])).unwrap_err(),
+            CliError::MissingValue("--sum")
+        ));
+        let err = parse_args(args(&[
+            "solvency",
+            "l.csv",
+            "--root",
+            &root,
+            "--sum",
+            "5",
+            "--reserves",
+            "-1",
+        ]))
+        .unwrap_err();
+        assert_eq!(err, CliError::InvalidSum(String::from("-1")));
+        assert_eq!(err.exit_code(), 2);
+    }
+
+    #[cfg(feature = "merkle_sum")]
+    #[test]
+    fn solvency_reports_ok_and_mismatch() {
+        use crate::sum::{MerkleSumTree, SumLeaf};
+
+        let csv = std::env::temp_dir().join("zk-merkle-cli-unit-solvency.csv");
+        let a = to_hex32(&[1u8; 32]);
+        let b = to_hex32(&[2u8; 32]);
+        std::fs::write(&csv, format!("{a},70\n{b},30\n")).unwrap();
+        let tree =
+            MerkleSumTree::from_leaves([SumLeaf::new([1; 32], 70), SumLeaf::new([2; 32], 30)])
+                .unwrap();
+        let root = to_hex32(&tree.root().unwrap().0);
+        let path = csv.to_str().unwrap();
+
+        let out =
+            run_from_args(args(&["solvency", path, "--root", &root, "--sum", "100"])).unwrap();
+        assert!(out.starts_with("status=ok\naccounts=2\n"), "{out}");
+        assert!(out.contains("total=match\nroot=match\n"));
+
+        let err = run_from_args(args(&[
+            "solvency",
+            path,
+            "--root",
+            &root,
+            "--sum",
+            "100",
+            "--reserves",
+            "99",
+        ]))
+        .unwrap_err();
+        assert_eq!(err.exit_code(), 1);
+        let text = err.to_string();
+        assert!(text.starts_with("status=mismatch"));
+        assert!(text.ends_with("reserves=99\nreserve_shortfall=1"));
+
+        let err =
+            run_from_args(args(&["solvency", path, "--root", &root, "--sum", "90"])).unwrap_err();
+        assert!(err.to_string().contains("total=understated by 10"));
+        let _ = std::fs::remove_file(&csv);
+    }
+
+    #[cfg(not(feature = "merkle_sum"))]
+    #[test]
+    fn solvency_explains_the_feature() {
+        let id = to_hex32(&[1u8; 32]);
+        let err =
+            run_from_args(args(&["solvency", "l.csv", "--root", &id, "--sum", "1"])).unwrap_err();
         assert!(err.to_string().contains("merkle_sum"));
     }
 }
