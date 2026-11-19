@@ -66,6 +66,11 @@ name = "range_circuit"
 path = "tests/range_circuit.rs"
 required-features = ["zk-range"]
 
+[[test]]
+name = "range_frozen"
+path = "tests/range_frozen.rs"
+required-features = ["zk-range"]
+
 [[bench]]
 name = "merkle_build"
 harness = false
