@@ -19,6 +19,11 @@ blake3 = { version = "1.5", default-features = false, optional = true }
 light-poseidon-nostd = { version = "0.4.1", default-features = false, optional = true }
 ark-bn254 = { version = "0.5", default-features = false, features = ["curve"], optional = true }
 ark-ff = { version = "0.5", default-features = false, optional = true }
+halo2_proofs = { version = "=0.3.5", default-features = false, optional = true }
+ff = { version = "0.13", default-features = false, optional = true }
+# halo2_proofs asks for blake2b_simd 1, which would otherwise resolve to an
+# edition-2024 release. Pin a 2021-edition crate so older Cargo can parse it.
+blake2b_simd = { version = "=1.0.2", optional = true }
 
 [dev-dependencies]
 proptest = { version = "=1.5.0", default-features = false, features = ["std"] }
@@ -55,6 +60,11 @@ name = "cli_sum"
 path = "tests/cli_sum.rs"
 required-features = ["std", "merkle_sum"]
 
+[[test]]
+name = "range_circuit"
+path = "tests/range_circuit.rs"
+required-features = ["zk-range"]
+
 [[bench]]
 name = "merkle_build"
 harness = false
@@ -73,3 +83,5 @@ rescue = []
 blake3 = ["dep:blake3"]
 ## Merkle sum tree types for proof of reserves (SHA-256, no extra deps).
 merkle_sum = []
+## 64-bit range-check circuit (`0 <= amount < 2^64`) via halo2_proofs.
+zk-range = ["std", "dep:halo2_proofs", "dep:ff", "dep:blake2b_simd"]
