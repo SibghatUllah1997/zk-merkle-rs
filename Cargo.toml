@@ -56,6 +56,11 @@ name = "cli_sum"
 path = "tests/cli_sum.rs"
 required-features = ["std", "merkle_sum"]
 
+[[test]]
+name = "range_circuit"
+path = "tests/range_circuit.rs"
+required-features = ["zk-range"]
+
 [[bench]]
 name = "merkle_build"
 harness = false
