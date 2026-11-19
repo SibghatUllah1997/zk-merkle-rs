@@ -58,6 +58,7 @@
 //! - [`log`] — append-only log with successive Merkle-root checkpoints
 //! - [`features`] — which optional crate features this build compiled with
 //! - `sum` (feature `merkle_sum`) — Merkle sum tree, inclusion proofs, CSV leaves, layer totals, and serde-ready roots
+//! - `solvency` (feature `merkle_sum`) — compare a published root and total with an independent liabilities snapshot
 //! - `range` (feature `zk-range`) — 64-bit Halo 2 range-check circuit (`0 <= amount < 2^64`)
 
 #![cfg_attr(not(feature = "std"), no_std)]
@@ -90,6 +91,8 @@ pub mod proof;
 #[cfg(feature = "zk-range")]
 pub mod range;
 /// Merkle sum tree, inclusion proofs, and CSV helpers for proof of reserves.
+#[cfg(feature = "merkle_sum")]
+pub mod solvency;
 #[cfg(feature = "merkle_sum")]
 pub mod sum;
 /// Merkle tree construction, typed roots, and leaf metadata.
@@ -126,6 +129,8 @@ pub use range::{
     amount_in_range, generate_range_proof, verify_range_proof, RangeCheckCircuit, RangeProof,
     RangeProofError, RANGE_BITS, RANGE_K, RANGE_MAX,
 };
+#[cfg(feature = "merkle_sum")]
+pub use solvency::{compare_liabilities, SolvencyError, SolvencyReport, TotalStatus};
 #[cfg(feature = "merkle_sum")]
 pub use sum::{
     parse_sum_csv, parse_sum_proof_text, sum_proof_to_text, AccountId, MerkleSumTree, SumCsvError,
