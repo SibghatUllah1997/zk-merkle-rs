@@ -27,3 +27,10 @@ fn circuit_constructor_mirrors_the_range_check() {
     assert_eq!(RangeCheckCircuit::new(7).amount, Some(7));
     assert!(RangeCheckCircuit::try_from_amount(u128::MAX).is_none());
 }
+
+#[test]
+fn public_instance_has_one_field_element() {
+    let instance = RangeCheckCircuit::instance(123456789);
+    assert_eq!(instance.len(), 1);
+    assert_eq!(instance[0].len(), 1);
+}

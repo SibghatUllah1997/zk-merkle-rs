@@ -4,15 +4,17 @@
 //! negative; this circuit additionally proves `0 <= amount < 2^64` using the
 //! audited [`halo2_proofs`] crate (Zcash Halo 2 over Pasta).
 //!
-//! This module assigns the 64 little-endian bits of the amount and constrains
-//! each bit to `{0, 1}`. Reconstructing the amount from those bits and
-//! exposing it as a public input is the next step.
+//! Each of the 64 little-endian bits is constrained to `{0, 1}`. A running
+//! sum reconstructs `sum_i bit_i * 2^i` and is copy-constrained to a public
+//! instance, so a verifier who knows `amount` can check it is a 64-bit value.
 
 use ff::Field;
 use halo2_proofs::{
-    circuit::{Layouter, SimpleFloorPlanner, Value},
+    circuit::{AssignedCell, Layouter, SimpleFloorPlanner, Value},
     pasta::Fp,
-    plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Expression, Selector},
+    plonk::{
+        Advice, Circuit, Column, ConstraintSystem, Error, Expression, Fixed, Instance, Selector,
+    },
     poly::Rotation,
 };
 
@@ -76,13 +78,23 @@ impl RangeCheckCircuit {
             None
         }
     }
+
+    /// Public Halo 2 instance for `amount`: one Pasta field element.
+    pub fn instance(amount: u64) -> Vec<Vec<Fp>> {
+        vec![vec![Fp::from(amount)]]
+    }
 }
 
 /// Columns and selectors for [`RangeCheckCircuit`].
 #[derive(Clone, Debug)]
 pub struct RangeCheckConfig {
     bit: Column<Advice>,
+    acc: Column<Advice>,
+    pow2: Column<Fixed>,
+    instance: Column<Instance>,
     s_bit: Selector,
+    s_start: Selector,
+    s_acc: Selector,
 }
 
 impl Circuit<Fp> for RangeCheckCircuit {
@@ -95,16 +107,51 @@ impl Circuit<Fp> for RangeCheckCircuit {
 
     fn configure(meta: &mut ConstraintSystem<Fp>) -> Self::Config {
         let bit = meta.advice_column();
+        let acc = meta.advice_column();
+        let pow2 = meta.fixed_column();
+        let instance = meta.instance_column();
         let s_bit = meta.selector();
+        let s_start = meta.selector();
+        let s_acc = meta.selector();
 
-        // s * bit * (1 - bit) = 0  =>  bit ∈ {0, 1} on selected rows.
+        meta.enable_equality(acc);
+        meta.enable_equality(instance);
+
+        // s_bit * bit * (1 - bit) = 0  =>  bit ∈ {0, 1} on selected rows.
         meta.create_gate("bitness", |meta| {
             let s = meta.query_selector(s_bit);
             let bit = meta.query_advice(bit, Rotation::cur());
             vec![s * bit.clone() * (Expression::Constant(Fp::ONE) - bit)]
         });
 
-        RangeCheckConfig { bit, s_bit }
+        // First row: acc = bit * 2^0.
+        meta.create_gate("start", |meta| {
+            let s = meta.query_selector(s_start);
+            let bit = meta.query_advice(bit, Rotation::cur());
+            let acc_cur = meta.query_advice(acc, Rotation::cur());
+            let pow = meta.query_fixed(pow2);
+            vec![s * (acc_cur - bit * pow)]
+        });
+
+        // Later rows: acc = acc_prev + bit * 2^i.
+        meta.create_gate("accumulate", |meta| {
+            let s = meta.query_selector(s_acc);
+            let bit = meta.query_advice(bit, Rotation::cur());
+            let acc_cur = meta.query_advice(acc, Rotation::cur());
+            let acc_prev = meta.query_advice(acc, Rotation::prev());
+            let pow = meta.query_fixed(pow2);
+            vec![s * (acc_cur - acc_prev - bit * pow)]
+        });
+
+        RangeCheckConfig {
+            bit,
+            acc,
+            pow2,
+            instance,
+            s_bit,
+            s_start,
+            s_acc,
+        }
     }
 
     fn synthesize(
@@ -112,20 +159,37 @@ impl Circuit<Fp> for RangeCheckCircuit {
         config: Self::Config,
         mut layouter: impl Layouter<Fp>,
     ) -> Result<(), Error> {
-        layouter.assign_region(
+        let amount_cell: AssignedCell<Fp, Fp> = layouter.assign_region(
             || "range bits",
             |mut region| {
+                let mut acc = Value::known(Fp::ZERO);
+                let mut last = None;
                 for i in 0..RANGE_BITS {
                     config.s_bit.enable(&mut region, i)?;
-                    let bit_val = match self.amount {
+                    if i == 0 {
+                        config.s_start.enable(&mut region, i)?;
+                    } else {
+                        config.s_acc.enable(&mut region, i)?;
+                    }
+
+                    let pow = Fp::from(1u64 << i);
+                    region.assign_fixed(|| "pow2", config.pow2, i, || Value::known(pow))?;
+
+                    let bit_v = match self.amount {
                         Some(a) => Value::known(Fp::from((a >> i) & 1)),
                         None => Value::unknown(),
                     };
-                    region.assign_advice(|| "bit", config.bit, i, || bit_val)?;
+                    region.assign_advice(|| "bit", config.bit, i, || bit_v)?;
+
+                    acc = acc + bit_v * Value::known(pow);
+                    last = Some(region.assign_advice(|| "acc", config.acc, i, || acc)?);
                 }
-                Ok(())
+                Ok(last.expect("RANGE_BITS > 0"))
             },
-        )
+        )?;
+
+        layouter.constrain_instance(amount_cell.cell(), config.instance, 0)?;
+        Ok(())
     }
 }
 
@@ -136,7 +200,8 @@ mod tests {
 
     fn mock_ok(amount: u64) {
         let circuit = RangeCheckCircuit::new(amount);
-        let prover = MockProver::run(RANGE_K, &circuit, vec![]).expect("rows");
+        let prover =
+            MockProver::run(RANGE_K, &circuit, RangeCheckCircuit::instance(amount)).expect("rows");
         prover.verify().expect("satisfied");
     }
 
@@ -177,8 +242,9 @@ mod tests {
     #[test]
     fn k_is_large_enough_for_64_bits_and_blinding() {
         let circuit = RangeCheckCircuit::new(1);
-        MockProver::run(RANGE_K, &circuit, vec![]).expect("k=7 has enough rows");
-        let too_small = MockProver::run(6, &circuit, vec![]);
+        MockProver::run(RANGE_K, &circuit, RangeCheckCircuit::instance(1))
+            .expect("k=7 has enough rows");
+        let too_small = MockProver::run(6, &circuit, RangeCheckCircuit::instance(1));
         assert!(too_small.is_err(), "k=6 should be short of blinding rows");
     }
 
@@ -186,5 +252,30 @@ mod tests {
     fn without_witnesses_clears_the_amount() {
         let circuit = RangeCheckCircuit::new(99);
         assert!(circuit.without_witnesses().amount.is_none());
+    }
+
+    #[test]
+    fn reconstructed_amount_must_match_the_public_instance() {
+        let circuit = RangeCheckCircuit::new(42);
+        let prover =
+            MockProver::run(RANGE_K, &circuit, RangeCheckCircuit::instance(42)).expect("rows");
+        prover.verify().expect("42 is in range");
+
+        let wrong =
+            MockProver::run(RANGE_K, &circuit, RangeCheckCircuit::instance(43)).expect("rows");
+        assert!(
+            wrong.verify().is_err(),
+            "a different public amount must fail"
+        );
+    }
+
+    #[test]
+    fn endpoints_of_the_64_bit_range_match_the_instance() {
+        mock_ok(0);
+        mock_ok(u64::MAX);
+        let circuit = RangeCheckCircuit::new(0);
+        let swapped = MockProver::run(RANGE_K, &circuit, RangeCheckCircuit::instance(u64::MAX))
+            .expect("rows");
+        assert!(swapped.verify().is_err());
     }
 }
