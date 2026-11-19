@@ -45,6 +45,7 @@
 //!   stores overlapping siblings once
 //! - Poseidon (feature `poseidon`) is circom-compatible BN254 hashing; Rescue
 //!   is still a placeholder
+//! - Range proofs (feature `zk-range`) prove `0 <= amount < 2^64` with Halo 2
 //! - Hashes are stored leaf-to-root in one buffer; see [`MerkleTree::hash_count`]
 //!
 //! Layout:

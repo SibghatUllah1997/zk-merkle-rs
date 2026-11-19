@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-19 (zk-range)
+
+- Add a `zk-range` feature with a Halo 2 circuit that proves `0 <= amount < 2^64`
+- `generate_range_proof` and `verify_range_proof` emit and check that proof
+- Tests pin a frozen transcript for amount 42; values of `2^64` or more are rejected before proving
+
 ## 2026-11-18 (sum-tree properties)
 
 - Property tests check that every subtree sum equals the folded leaf amounts

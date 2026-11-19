@@ -54,6 +54,8 @@ jobs:
             flags: --no-default-features --features blake3
           - name: no_std+merkle_sum
             flags: --no-default-features --features merkle_sum
+          - name: std+zk-range
+            flags: --no-default-features --features std,zk-range
     steps:
       - name: Checkout
         uses: actions/checkout@v4

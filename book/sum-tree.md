@@ -166,8 +166,9 @@ whether the hash or the total did not match.
 The proof file does not carry the root. The user should pass the root and
 total the exchange published, so a proof file cannot vouch for itself.
 
-## What is not here yet
+## Range proofs
 
-Range proofs for non-negative balances come in later roadmap steps. `u128`
-already rules out negative amounts in the leaf encoding; the range proof will
-let a user check that without seeing other balances.
+`u128` already rules out negative amounts in the leaf encoding. The `zk-range`
+feature additionally proves `0 <= amount < 2^64` with a Halo 2 circuit, so a
+published balance cannot hide a wrap by using more than 64 bits. See
+[Range proofs](range.md).

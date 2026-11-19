@@ -1,8 +1,9 @@
 //! Compile-time crate feature flags for this build.
 //!
 //! These constants match the `[features]` table in `Cargo.toml`. Use them
-//! when a caller needs to branch on whether serde, BLAKE3, or Poseidon was
-//! compiled in, without duplicating `cfg` attributes at every call site.
+//! when a caller needs to branch on whether serde, BLAKE3, Poseidon, or the
+//! Halo 2 range-check circuit was compiled in, without duplicating `cfg`
+//! attributes at every call site.
 
 /// Default `std` feature: CLI, [`crate::chunk_reader`], and `std::error::Error`.
 pub const STD: bool = cfg!(feature = "std");

@@ -22,6 +22,7 @@ Fast, tiny, no_std-friendly SHA-256 Merkle tree with inclusion proofs and a clea
 - no_std: works without `std` (uses `alloc`) via feature flags
 - BLAKE3: the `blake3` feature adds `BLAKE3(0x00 || data)` / `BLAKE3(0x01 || l || r)` trees via `MerkleTree::try_from_leaves_with(HashAlgorithm::Blake3, ..)` and `verify_with`
 - Merkle sum tree: the `merkle_sum` feature adds `MerkleSumTree::from_leaves`, `root() -> (hash, total)`, inclusion proofs, and `parse_sum_csv` / `merkle sum-build` for account-amount CSV, `merkle sum-prove` / `sum-verify` for per-account proofs, built on `SumLeaf` / `SumNode` with `SHA-256(0x30 || id || amount)` leaves and sum-committing `0x31` parents
+- Range proofs: the `zk-range` feature adds a Halo 2 circuit that proves `0 <= amount < 2^64`, with `generate_range_proof` / `verify_range_proof`
 - Poseidon: the `poseidon` feature hashes with circom-compatible BN254 Poseidon (`0x10`/`0x11` domain tags) via `try_from_leaves_with(HashAlgorithm::Poseidon, ..)`
 - Hash placeholder: the `rescue` feature still returns `HashNotImplemented`
 - Chunking: split buffers or `Read` streams into fixed-size leaves (`chunk_bytes`, `chunk_reader`)
@@ -142,6 +143,7 @@ graph TD
 - Rescue stub: `cargo test --features rescue` (functions return `HashNotImplemented`)
 - BLAKE3: `cargo test --features blake3` and `cargo test --no-default-features --features blake3`
 - Merkle sum: `cargo test --features merkle_sum` and `cargo test --features merkle_sum,serde`
+- Range proofs: `cargo test --features zk-range` (Halo 2 64-bit check; needs `std`)
 - Format and lints: `cargo fmt --all --check` and `cargo clippy --all-targets --all-features -D warnings`
 - Docs: `cargo doc --no-deps` for the API, `mdbook build` for the longer-form book (`book/`, including variants, padding, and domain tags)
 
