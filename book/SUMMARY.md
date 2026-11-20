@@ -11,3 +11,4 @@
 - [Domain tags](domains.md)
 - [Merkle sum trees](sum-tree.md)
 - [Range proofs](range.md)
+- [Verifying in the browser](wasm.md)

@@ -23,6 +23,9 @@ pub const MERKLE_SUM: bool = cfg!(feature = "merkle_sum");
 /// 64-bit Halo 2 range-check circuit (`zk-range`).
 pub const ZK_RANGE: bool = cfg!(feature = "zk-range");
 
+/// wasm-bindgen inclusion-proof verifier (`wasm`).
+pub const WASM: bool = cfg!(feature = "wasm");
+
 /// Rescue placeholder API (`HashNotImplemented`).
 pub const RESCUE: bool = cfg!(feature = "rescue");
 
@@ -46,6 +49,8 @@ pub fn enabled() -> &'static [&'static str] {
         "merkle_sum",
         #[cfg(feature = "zk-range")]
         "zk-range",
+        #[cfg(feature = "wasm")]
+        "wasm",
     ]
 }
 
@@ -62,6 +67,7 @@ mod tests {
         assert_eq!(enabled().contains(&"rescue"), RESCUE);
         assert_eq!(enabled().contains(&"merkle_sum"), MERKLE_SUM);
         assert_eq!(enabled().contains(&"zk-range"), ZK_RANGE);
+        assert_eq!(enabled().contains(&"wasm"), WASM);
         assert_eq!(STD, cfg!(feature = "std"));
         assert_eq!(BLAKE3, cfg!(feature = "blake3"));
         assert_eq!(POSEIDON, cfg!(feature = "poseidon"));

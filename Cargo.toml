@@ -25,6 +25,7 @@ ff = { version = "0.13", default-features = false, optional = true }
 # edition-2024 release. Pin a 2021-edition crate so older Cargo can parse it.
 blake2b_simd = { version = "=1.0.2", optional = true }
 rand = { version = "0.8", optional = true }
+wasm-bindgen = { version = "0.2", optional = true }
 
 [dev-dependencies]
 proptest = { version = "=1.5.0", default-features = false, features = ["std"] }
@@ -62,6 +63,11 @@ path = "tests/cli_sum.rs"
 required-features = ["std", "merkle_sum"]
 
 [[test]]
+name = "wasm_verify"
+path = "tests/wasm_verify.rs"
+required-features = ["wasm"]
+
+[[test]]
 name = "range_circuit"
 path = "tests/range_circuit.rs"
 required-features = ["zk-range"]
@@ -91,3 +97,5 @@ blake3 = ["dep:blake3"]
 merkle_sum = []
 ## 64-bit range-check circuit (`0 <= amount < 2^64`) via halo2_proofs.
 zk-range = ["std", "dep:halo2_proofs", "dep:ff", "dep:blake2b_simd", "dep:rand"]
+## Browser verifier for plain and sum-tree inclusion proofs via wasm-bindgen.
+wasm = ["std", "merkle_sum", "dep:wasm-bindgen"]

@@ -23,6 +23,7 @@ Fast, tiny, no_std-friendly SHA-256 Merkle tree with inclusion proofs and a clea
 - BLAKE3: the `blake3` feature adds `BLAKE3(0x00 || data)` / `BLAKE3(0x01 || l || r)` trees via `MerkleTree::try_from_leaves_with(HashAlgorithm::Blake3, ..)` and `verify_with`
 - Merkle sum tree: the `merkle_sum` feature adds `MerkleSumTree::from_leaves`, `root() -> (hash, total)`, inclusion proofs, and `parse_sum_csv` / `merkle sum-build` for account-amount CSV, `merkle sum-prove` / `sum-verify` for per-account proofs, `merkle solvency` to compare a published root and total with your own liabilities snapshot, built on `SumLeaf` / `SumNode` with `SHA-256(0x30 || id || amount)` leaves and sum-committing `0x31` parents
 - Range proofs: the `zk-range` feature adds a Halo 2 circuit that proves `0 <= amount < 2^64`, with `generate_range_proof` / `verify_range_proof`
+- Browser verifier: the `wasm` feature exposes `verifySumProof` / `verifyInclusionProof` via wasm-bindgen for a client-side proof check page (see `book/wasm.md`)
 - Poseidon: the `poseidon` feature hashes with circom-compatible BN254 Poseidon (`0x10`/`0x11` domain tags) via `try_from_leaves_with(HashAlgorithm::Poseidon, ..)`
 - Hash placeholder: the `rescue` feature still returns `HashNotImplemented`
 - Chunking: split buffers or `Read` streams into fixed-size leaves (`chunk_bytes`, `chunk_reader`)

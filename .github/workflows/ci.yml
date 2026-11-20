@@ -56,6 +56,8 @@ jobs:
             flags: --no-default-features --features merkle_sum
           - name: std+zk-range
             flags: --no-default-features --features std,zk-range
+          - name: wasm
+            flags: --no-default-features --features wasm
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -71,6 +73,26 @@ jobs:
 
       - name: Tests
         run: cargo test ${{ matrix.flags }} -- --nocapture
+
+  wasm:
+    name: wasm32 verifier
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: |
+          rustup update stable
+          rustup default stable
+          rustup target add wasm32-unknown-unknown
+
+      # The crate stays an rlib everywhere else; only this build asks for a cdylib.
+      - name: Build verifier module
+        run: |
+          cargo rustc --lib --release --target wasm32-unknown-unknown \
+            --no-default-features --features wasm --crate-type cdylib
+          test -s target/wasm32-unknown-unknown/release/merkle_tree.wasm
 
   no_std:
     name: no_std (bare metal)
