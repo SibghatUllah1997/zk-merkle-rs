@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-20 (demo and threat model)
+
+- Optional `verifyRangeProof` on the wasm module when `zk-range` is enabled
+- Static demo page and CLI runbook so users can paste proofs into the browser
+- Threat-model notes cover valuation, excluded accounts, and timing gaps a sum tree does not close
+
 ## 2026-11-20 (wasm verifier)
 
 - New `wasm` feature with `verifySumProof` and `verifyInclusionProof`, built with wasm-bindgen for client-side checks

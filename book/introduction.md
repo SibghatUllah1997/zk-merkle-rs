@@ -45,4 +45,5 @@ hash, and why the tree keeps every digest in one `Vec`. Start with
 [Tree variants](variants.md) if you are matching another system's root,
 [Padding](padding.md) for the odd-layer rule, and [Domain tags](domains.md)
 for the prefix registry. The [CLI runbook](runbook.md) walks through `merkle`
-commands and the browser verifier.
+commands and the browser verifier. [Threat model](threat-model.md) lists
+what a published root still does not prove.

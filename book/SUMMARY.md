@@ -13,3 +13,4 @@
 - [Range proofs](range.md)
 - [Verifying in the browser](wasm.md)
 - [CLI runbook](runbook.md)
+- [Threat model](threat-model.md)

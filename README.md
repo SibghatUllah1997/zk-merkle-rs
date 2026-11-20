@@ -23,13 +23,13 @@ Fast, tiny, no_std-friendly SHA-256 Merkle tree with inclusion proofs and a clea
 - BLAKE3: the `blake3` feature adds `BLAKE3(0x00 || data)` / `BLAKE3(0x01 || l || r)` trees via `MerkleTree::try_from_leaves_with(HashAlgorithm::Blake3, ..)` and `verify_with`
 - Merkle sum tree: the `merkle_sum` feature adds `MerkleSumTree::from_leaves`, `root() -> (hash, total)`, inclusion proofs, and `parse_sum_csv` / `merkle sum-build` for account-amount CSV, `merkle sum-prove` / `sum-verify` for per-account proofs, `merkle solvency` to compare a published root and total with your own liabilities snapshot, built on `SumLeaf` / `SumNode` with `SHA-256(0x30 || id || amount)` leaves and sum-committing `0x31` parents
 - Range proofs: the `zk-range` feature adds a Halo 2 circuit that proves `0 <= amount < 2^64`, with `generate_range_proof` / `verify_range_proof`
-- Browser verifier: the `wasm` feature exposes `verifySumProof` / `verifyInclusionProof` via wasm-bindgen; `demo/index.html` is a static page that calls them (see `book/wasm.md`)
+- Browser verifier: the `wasm` feature exposes `verifySumProof` / `verifyInclusionProof` via wasm-bindgen (and `verifyRangeProof` with `zk-range`); `demo/index.html` is a static page that calls them (see `book/wasm.md`)
 - Poseidon: the `poseidon` feature hashes with circom-compatible BN254 Poseidon (`0x10`/`0x11` domain tags) via `try_from_leaves_with(HashAlgorithm::Poseidon, ..)`
 - Hash placeholder: the `rescue` feature still returns `HashNotImplemented`
 - Chunking: split buffers or `Read` streams into fixed-size leaves (`chunk_bytes`, `chunk_reader`)
 - Append-only log: `MerkleLog` records a root checkpoint after each append or batch
 - Contiguous layout: all hashes sit in one buffer; `hash_count`, `storage_bytes`, and `layer_hashes` expose it
-- Security: `committed_root` binds a root to its leaf count, and `verify_committed` checks index, depth, and sides; see `book/security.md`
+- Security: `committed_root` binds a root to its leaf count, and `verify_committed` checks index, depth, and sides; see `book/security.md`. Proof-of-reserves gaps are in `book/threat-model.md`.
 - Domain tags: `DomainKind` names the `0x00`/`0x01`/`0x02` prefixes and the reserved Poseidon/Rescue values
 - Feature flags: `merkle_tree::features` reports which optional hashes this build compiled with
 - Book: `mdbook build` / `mdbook serve` from the repo root (source in `book/`, including variants, padding, and domains)

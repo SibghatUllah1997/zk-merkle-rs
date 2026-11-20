@@ -50,4 +50,4 @@ Each item is one small, shippable step. Hashing and range proofs must use audite
 39. [x] Expose `generate_range_proof` and `verify_range_proof`, with tests against a frozen vector
 40. [x] Add solvency tooling that compares a published `total_sum` to an independently computed liabilities snapshot
 41. [x] Add a `wasm-bindgen` verifier for inclusion proofs and, optionally, range proofs
-42. [ ] Add a small demo page, CLI runbook, and threat-model notes (valuation, excluded accounts, timing)
+42. [x] Add a small demo page, CLI runbook, and threat-model notes (valuation, excluded accounts, timing)

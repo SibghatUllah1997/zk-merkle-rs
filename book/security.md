@@ -72,3 +72,6 @@ So an honest proof cannot be replayed at another index, padded, or cut short.
 - **Constant time.** Verification compares public data, so it is not written
   to run in constant time. Do not use it to compare secrets.
 - **Rescue.** It is still a placeholder and returns `HashNotImplemented`.
+
+Proof-of-reserves gaps (valuation, omitted leaves, snapshot timing) live in
+[Threat model](threat-model.md).
