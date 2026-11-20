@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-20 (wasm verifier)
+
+- New `wasm` feature with `verifySumProof` and `verifyInclusionProof`, built with wasm-bindgen for client-side checks
+- Both return a `Verdict` (`ok`, `reason`, `account`, `amount`) instead of throwing; balances stay strings so `u128` survives JavaScript
+- CI builds the verifier for `wasm32-unknown-unknown`; range proofs stay CLI-only for now
+
 ## 2026-11-19 (solvency check)
 
 - `solvency::compare_liabilities` rebuilds the sum tree from an auditor's own balance snapshot and compares it with the published root and total

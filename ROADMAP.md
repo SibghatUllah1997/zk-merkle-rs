@@ -49,5 +49,5 @@ Each item is one small, shippable step. Hashing and range proofs must use audite
 38. [x] Add a `zk-range` feature with a 64-bit range-check circuit in the audited `halo2` crate (`0 <= amount < 2^64`)
 39. [x] Expose `generate_range_proof` and `verify_range_proof`, with tests against a frozen vector
 40. [x] Add solvency tooling that compares a published `total_sum` to an independently computed liabilities snapshot
-41. [ ] Add a `wasm-bindgen` verifier for inclusion proofs and, optionally, range proofs
+41. [x] Add a `wasm-bindgen` verifier for inclusion proofs and, optionally, range proofs
 42. [ ] Add a small demo page, CLI runbook, and threat-model notes (valuation, excluded accounts, timing)
