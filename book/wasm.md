@@ -18,6 +18,8 @@ v.free();
   `merkle sum-prove`, plus the root hash and total the exchange published.
 - `verifyInclusionProof(leaf, steps, rootHex)` checks a plain-tree proof in
   the CLI's `R:<hex>,L:<hex>` path format.
+- `verifyRangeProof(amount, proofHex)` (needs `zk-range`) checks a Halo 2
+  transcript that a public amount fits in 64 bits.
 
 Both return a `Verdict` with `ok`, `reason`, `account`, and `amount`. They
 never throw: bad hex, a malformed file, and a mismatched proof all come back
@@ -46,6 +48,7 @@ wasm-bindgen --target web --out-dir pkg \
   so a forged file cannot vouch for itself.
 - A failed sum-tree check still reports the account and amount it parsed, so
   the page can say which balance did not match.
-- Range proofs are not exposed yet. The Halo 2 prover and its parameters add
-  a lot of weight to a browser bundle for a check the auditor can run with
-  the CLI; inclusion is what each user needs to check for themselves.
+- Range proofs are optional. Build with `--features wasm,zk-range` to
+  export `verifyRangeProof(amount, proofHex)`. The amount is public; the
+  proof only shows it fits in 64 bits. Halo 2 makes the wasm module much
+  larger, so skip it unless the page needs that check.

@@ -58,6 +58,8 @@ jobs:
             flags: --no-default-features --features std,zk-range
           - name: wasm
             flags: --no-default-features --features wasm
+          - name: wasm+zk-range
+            flags: --no-default-features --features wasm,zk-range
     steps:
       - name: Checkout
         uses: actions/checkout@v4

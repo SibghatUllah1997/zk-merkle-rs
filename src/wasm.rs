@@ -31,6 +31,8 @@
 
 use wasm_bindgen::prelude::wasm_bindgen;
 
+#[cfg(feature = "zk-range")]
+use crate::hashing::from_hex;
 use crate::hashing::{to_hex32, try_from_hex32};
 use crate::proof::{parse_proof_steps, verify_inclusion};
 use crate::sum::{parse_sum_proof_text, SumNode};
@@ -145,6 +147,33 @@ pub fn verify_inclusion_proof(leaf: &str, steps: &str, root_hex: &str) -> Verdic
     }
 }
 
+/// Verify a Halo 2 range proof that `amount` fits in 64 bits.
+///
+/// `amount` is a decimal `u128`. `proof_hex` is the transcript from
+/// [`crate::generate_range_proof`]. The amount is a public instance; this
+/// does not hide it. Needs the `zk-range` feature in addition to `wasm`.
+#[cfg(feature = "zk-range")]
+#[wasm_bindgen(js_name = verifyRangeProof)]
+pub fn verify_range_proof_js(amount: &str, proof_hex: &str) -> Verdict {
+    use crate::range::{verify_range_proof, RangeProof};
+
+    let amount_raw = amount.trim();
+    let parsed = match amount_raw.parse::<u128>() {
+        Ok(parsed) => parsed,
+        Err(_) => return Verdict::fail(format!("amount: invalid amount {amount_raw:?}")),
+    };
+    let bytes = match from_hex(proof_hex) {
+        Ok(bytes) => bytes,
+        Err(err) => return Verdict::fail(format!("proof: {err}")),
+    };
+    let mut verdict = match verify_range_proof(parsed, &RangeProof::from_bytes(bytes)) {
+        Ok(()) => Verdict::pass(),
+        Err(err) => Verdict::fail(err.to_string()),
+    };
+    verdict.amount = parsed.to_string();
+    verdict
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -224,5 +253,18 @@ mod tests {
         let tree = MerkleTree::from_leaves(["only"]);
         let root = to_hex32(&tree.root().expect("root"));
         assert!(verify_inclusion_proof("only", "", &root).ok());
+    }
+
+    #[cfg(feature = "zk-range")]
+    #[test]
+    fn range_proof_rejects_a_non_numeric_amount() {
+        let verdict = verify_range_proof_js("nope", "00");
+        assert!(!verdict.ok());
+        assert!(
+            verdict.reason().contains("invalid amount"),
+            "{}",
+            verdict.reason()
+        );
+        assert!(verdict.amount().is_empty());
     }
 }

@@ -78,6 +78,11 @@ path = "tests/wasm_verify.rs"
 required-features = ["wasm"]
 
 [[test]]
+name = "wasm_range"
+path = "tests/wasm_range.rs"
+required-features = ["wasm", "zk-range"]
+
+[[test]]
 name = "range_circuit"
 path = "tests/range_circuit.rs"
 required-features = ["zk-range"]
