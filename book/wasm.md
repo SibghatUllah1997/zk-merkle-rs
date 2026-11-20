@@ -52,3 +52,6 @@ wasm-bindgen --target web --out-dir pkg \
   export `verifyRangeProof(amount, proofHex)`. The amount is public; the
   proof only shows it fits in 64 bits. Halo 2 makes the wasm module much
   larger, so skip it unless the page needs that check.
+
+`demo/index.html` is a ready-made page that calls these functions. Point
+`--out-dir` at `demo/pkg` and serve `demo/` as described in `demo/README.md`.

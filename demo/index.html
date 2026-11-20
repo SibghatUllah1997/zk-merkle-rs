@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>merkle-tree proof verifier</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, sans-serif; max-width: 52rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.45; }
+    h1 { font-size: 1.4rem; }
+    h2 { font-size: 1.1rem; margin-top: 1.8rem; }
+    label { display: block; margin: 0.6rem 0 0.2rem; font-weight: 600; }
+    input, textarea { width: 100%; box-sizing: border-box; font: 0.95rem/1.4 ui-monospace, monospace; padding: 0.4rem; }
+    textarea { min-height: 7rem; }
+    button { margin-top: 0.8rem; padding: 0.4rem 0.8rem; }
+    .status { padding: 0.6rem 0.8rem; border-radius: 4px; background: #eee; }
+    @media (prefers-color-scheme: dark) { .status { background: #222; } }
+    .ok { color: #0a7; }
+    .bad { color: #c33; }
+    code { font-size: 0.9em; }
+    p.hint { color: #666; font-size: 0.92rem; }
+    @media (prefers-color-scheme: dark) { p.hint { color: #aaa; } }
+  </style>
+</head>
+<body>
+  <h1>Merkle proof verifier</h1>
+  <p>
+    This page loads the Rust verifiers compiled to WebAssembly. It does not
+    hash in JavaScript. Build the module first (see <code>demo/README.md</code>),
+    then paste output from the <code>merkle</code> CLI.
+  </p>
+  <p id="status" class="status">Loading wasm&hellip;</p>
+
+  <h2>SHA-256 inclusion</h2>
+  <p class="hint">
+    From <code>merkle prove --index N leaf&hellip;</code>: put the original leaf in
+    the first box (UTF-8, same as the CLI), the <code>steps=</code> list in
+    the second, and the <code>root=</code> hex in the third.
+  </p>
+  <form id="inclusion">
+    <label for="leaf">Leaf (UTF-8)</label>
+    <input id="leaf" name="leaf" autocomplete="off" spellcheck="false">
+    <label for="steps">Steps (<code>L:hex,R:hex</code>)</label>
+    <input id="steps" name="steps" autocomplete="off" spellcheck="false">
+    <label for="root">Root (hex)</label>
+    <input id="root" name="root" autocomplete="off" spellcheck="false">
+    <button type="submit">Verify inclusion</button>
+    <p id="inclusion-out"></p>
+  </form>
+
+  <h2>Merkle-sum inclusion</h2>
+  <p class="hint">
+    Paste the <code>key=value</code> file from <code>merkle sum-prove</code>.
+    The published root and total must come from the exchange, not from that
+    file.
+  </p>
+  <form id="sum">
+    <label for="proof-text">Proof text</label>
+    <textarea id="proof-text" name="proof-text" spellcheck="false"></textarea>
+    <label for="sum-root">Published root (hex)</label>
+    <input id="sum-root" name="sum-root" autocomplete="off" spellcheck="false">
+    <label for="sum-total">Published total</label>
+    <input id="sum-total" name="sum-total" inputmode="numeric" autocomplete="off" spellcheck="false">
+    <button type="submit">Verify sum proof</button>
+    <p id="sum-out"></p>
+  </form>
+
+  <h2>64-bit range proof</h2>
+  <p class="hint">
+    Optional. Rebuild with <code>--features wasm,zk-range</code> to enable.
+    Amount is public; the proof only shows it fits in 64 bits.
+  </p>
+  <form id="range">
+    <label for="amount">Amount</label>
+    <input id="amount" name="amount" inputmode="numeric" autocomplete="off" spellcheck="false">
+    <label for="range-hex">Proof (hex transcript)</label>
+    <textarea id="range-hex" name="range-hex" spellcheck="false"></textarea>
+    <button type="submit">Verify range proof</button>
+    <p id="range-out"></p>
+  </form>
+
+  <script type="module">
+    const status = document.getElementById("status");
+    const show = (el, ok, text) => {
+      el.className = ok ? "ok" : "bad";
+      el.textContent = text;
+    };
+    const explain = (v) => {
+      if (v.ok) return "ok";
+      return v.reason || "not included";
+    };
+
+    let wasm;
+    try {
+      wasm = await import("./pkg/merkle_tree.js");
+      await wasm.default();
+      status.textContent = "Wasm module loaded. Proofs are checked in Rust.";
+    } catch (err) {
+      status.className = "status bad";
+      status.textContent =
+        "Could not load ./pkg/merkle_tree.js. See demo/README.md for the cargo rustc / wasm-bindgen build.";
+      console.error(err);
+    }
+
+    document.getElementById("inclusion").addEventListener("submit", (event) => {
+      event.preventDefault();
+      const out = document.getElementById("inclusion-out");
+      if (!wasm) { show(out, false, "wasm not loaded"); return; }
+      const v = wasm.verifyInclusionProof(
+        document.getElementById("leaf").value,
+        document.getElementById("steps").value,
+        document.getElementById("root").value,
+      );
+      show(out, v.ok, v.ok ? "included under this root" : explain(v));
+      v.free();
+    });
+
+    document.getElementById("sum").addEventListener("submit", (event) => {
+      event.preventDefault();
+      const out = document.getElementById("sum-out");
+      if (!wasm) { show(out, false, "wasm not loaded"); return; }
+      const v = wasm.verifySumProof(
+        document.getElementById("proof-text").value,
+        document.getElementById("sum-root").value,
+        document.getElementById("sum-total").value,
+      );
+      const msg = v.ok
+        ? ("account " + v.account + " with " + v.amount + " is under this root")
+        : explain(v);
+      show(out, v.ok, msg);
+      v.free();
+    });
+
+    document.getElementById("range").addEventListener("submit", (event) => {
+      event.preventDefault();
+      const out = document.getElementById("range-out");
+      if (!wasm) { show(out, false, "wasm not loaded"); return; }
+      if (typeof wasm.verifyRangeProof !== "function") {
+        show(out, false, "rebuild with --features wasm,zk-range to enable range proofs");
+        return;
+      }
+      const v = wasm.verifyRangeProof(
+        document.getElementById("amount").value,
+        document.getElementById("range-hex").value,
+      );
+      show(out, v.ok, v.ok ? "amount fits in 64 bits" : explain(v));
+      v.free();
+    });
+  </script>
+</body>
+</html>
