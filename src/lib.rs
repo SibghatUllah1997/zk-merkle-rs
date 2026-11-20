@@ -60,6 +60,7 @@
 //! - `sum` (feature `merkle_sum`) — Merkle sum tree, inclusion proofs, CSV leaves, layer totals, and serde-ready roots
 //! - `solvency` (feature `merkle_sum`) — compare a published root and total with an independent liabilities snapshot
 //! - `range` (feature `zk-range`) — 64-bit Halo 2 range-check circuit (`0 <= amount < 2^64`)
+//! - `wasm` (feature `wasm`) — wasm-bindgen verifier for plain and sum-tree inclusion proofs
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
@@ -97,6 +98,9 @@ pub mod solvency;
 pub mod sum;
 /// Merkle tree construction, typed roots, and leaf metadata.
 pub mod tree;
+/// wasm-bindgen entry points that verify inclusion proofs in a browser.
+#[cfg(feature = "wasm")]
+pub mod wasm;
 
 pub use cache::ProofIndexCache;
 #[cfg(feature = "std")]
