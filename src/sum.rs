@@ -1229,11 +1229,11 @@ mod tests {
         let (leaves, tree) = five_leaf_tree();
         let text = sum_proof_to_text(&leaves[0], &tree.prove(0).unwrap());
 
-        let without_amount: String = text
-            .lines()
-            .filter(|l| !l.starts_with("amount="))
-            .map(|l| format!("{l}\n"))
-            .collect();
+        let mut without_amount = String::new();
+        for line in text.lines().filter(|l| !l.starts_with("amount=")) {
+            without_amount.push_str(line);
+            without_amount.push('\n');
+        }
         assert_eq!(
             parse_sum_proof_text(&without_amount).unwrap_err(),
             SumProofTextError::Missing("amount")

@@ -75,6 +75,7 @@ mod tests {
         assert_eq!(RESCUE, cfg!(feature = "rescue"));
         assert_eq!(ZK_RANGE, cfg!(feature = "zk-range"));
         assert_eq!(MERKLE_SUM, cfg!(feature = "merkle_sum"));
+        assert_eq!(WASM, cfg!(feature = "wasm"));
     }
 
     #[test]

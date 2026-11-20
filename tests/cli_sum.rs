@@ -64,9 +64,10 @@ fn help_mentions_sum_build() {
 
 fn write_balances(name: &str) -> std::path::PathBuf {
     let path = std::env::temp_dir().join(name);
-    let rows: String = (1u8..=5)
-        .map(|i| format!("{},{}\n", to_hex32(&[i; 32]), u128::from(i) * 100))
-        .collect();
+    let mut rows = String::new();
+    for i in 1u8..=5 {
+        rows.push_str(&format!("{},{}\n", to_hex32(&[i; 32]), u128::from(i) * 100));
+    }
     std::fs::write(&path, format!("account_id,amount\n{rows}")).expect("write csv");
     path
 }

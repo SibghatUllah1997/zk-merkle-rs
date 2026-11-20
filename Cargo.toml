@@ -15,7 +15,8 @@ categories = ["cryptography", "data-structures", "no-std"]
 sha2 = { version = "0.10", default-features = false }
 hex = { version = "0.4", default-features = false, features = ["alloc"] }
 serde = { version = "1.0", default-features = false, features = ["derive", "alloc"], optional = true }
-blake3 = { version = "1.5", default-features = false, optional = true }
+# blake3 1.8.7's crate manifest uses edition 2024, which Cargo 1.83 cannot parse.
+blake3 = { version = "=1.5.5", default-features = false, optional = true }
 light-poseidon-nostd = { version = "0.4.1", default-features = false, optional = true }
 ark-bn254 = { version = "0.5", default-features = false, features = ["curve"], optional = true }
 ark-ff = { version = "0.5", default-features = false, optional = true }
@@ -25,7 +26,16 @@ ff = { version = "0.13", default-features = false, optional = true }
 # edition-2024 release. Pin a 2021-edition crate so older Cargo can parse it.
 blake2b_simd = { version = "=1.0.2", optional = true }
 rand = { version = "0.8", optional = true }
-wasm-bindgen = { version = "0.2", optional = true }
+# Pin a 2021-edition wasm-bindgen. Newer 0.2 releases pull edition-2024
+# crates that Cargo 1.83 cannot parse.
+wasm-bindgen = { version = "=0.2.100", optional = true }
+# zeroize 1.9+ and zeroize_derive 1.5 use edition 2024. Pin 2021-edition
+# crates so halo2_proofs stays parseable on Cargo 1.83.
+zeroize = { version = "=1.8.1", optional = true, default-features = false }
+zeroize_derive = { version = "=1.4.2", optional = true }
+# enum-ordinalize 4.4 uses edition 2024. Pin 4.3 so Halo 2 deps parse on Cargo 1.83.
+enum-ordinalize = { version = "=4.3.2", optional = true, default-features = false }
+enum-ordinalize-derive = { version = "=4.3.2", optional = true }
 
 [dev-dependencies]
 proptest = { version = "=1.5.0", default-features = false, features = ["std"] }
@@ -96,6 +106,6 @@ blake3 = ["dep:blake3"]
 ## Merkle sum tree types for proof of reserves (SHA-256, no extra deps).
 merkle_sum = []
 ## 64-bit range-check circuit (`0 <= amount < 2^64`) via halo2_proofs.
-zk-range = ["std", "dep:halo2_proofs", "dep:ff", "dep:blake2b_simd", "dep:rand"]
+zk-range = ["std", "dep:halo2_proofs", "dep:ff", "dep:blake2b_simd", "dep:rand", "dep:zeroize", "dep:zeroize_derive", "dep:enum-ordinalize", "dep:enum-ordinalize-derive"]
 ## Browser verifier for plain and sum-tree inclusion proofs via wasm-bindgen.
 wasm = ["std", "merkle_sum", "dep:wasm-bindgen"]
