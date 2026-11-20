@@ -66,6 +66,8 @@ cargo run --features merkle_sum --bin merkle -- solvency liabilities.csv --root 
 
 `build` prints a 64-character lowercase hex root. `prove` prints `root`, `index`, `leaf_hash`, and compact `steps` that `verify` consumes. `sum-build` (needs `merkle_sum`) reads `account_id,amount` CSV and prints `root` and `sum`. `sum-prove` exports one account's proof as `key=value` lines, and `sum-verify` checks that file against the published root and total. `solvency` rebuilds the tree from an independent liabilities CSV and reports total, root, duplicate-id, and reserve-coverage results; any mismatch exits 1.
 
+The [CLI runbook](book/runbook.md) walks through every command and exit code.
+
 ### Examples
 Chunk a file (or a bundled sample) into leaves and prove the last chunk:
 

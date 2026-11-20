@@ -12,3 +12,4 @@
 - [Merkle sum trees](sum-tree.md)
 - [Range proofs](range.md)
 - [Verifying in the browser](wasm.md)
+- [CLI runbook](runbook.md)
