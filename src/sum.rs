@@ -176,6 +176,14 @@ pub enum SumBuildError {
         /// Later leaf that reused it.
         second: usize,
     },
+    /// Account ids are not strictly increasing at `index`.
+    ///
+    /// Equal neighbouring ids are [`Self::Duplicate`] instead. This variant
+    /// means the id at `index` is smaller than the one before it.
+    Unsorted {
+        /// First index whose account id is smaller than the previous leaf.
+        index: usize,
+    },
 }
 
 impl core::fmt::Display for SumBuildError {
@@ -191,6 +199,12 @@ impl core::fmt::Display for SumBuildError {
                 "account {} appears at index {first} and {second}",
                 to_hex32(account_id)
             ),
+            SumBuildError::Unsorted { index } => {
+                write!(
+                    f,
+                    "account ids are not strictly increasing at index {index}"
+                )
+            }
         }
     }
 }
@@ -200,7 +214,7 @@ impl std::error::Error for SumBuildError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             SumBuildError::Overflow(err) => Some(err),
-            SumBuildError::Duplicate { .. } => None,
+            SumBuildError::Duplicate { .. } | SumBuildError::Unsorted { .. } => None,
         }
     }
 }
@@ -223,6 +237,26 @@ fn first_duplicate(leaves: &[SumLeaf]) -> Option<SumBuildError> {
             });
         }
         seen.insert(leaf.account_id, index);
+    }
+    None
+}
+
+/// First ordering problem in `leaves` when they must be strictly increasing.
+fn first_sorted_error(leaves: &[SumLeaf]) -> Option<SumBuildError> {
+    for i in 1..leaves.len() {
+        match leaves[i].account_id.cmp(&leaves[i - 1].account_id) {
+            core::cmp::Ordering::Greater => {}
+            core::cmp::Ordering::Equal => {
+                return Some(SumBuildError::Duplicate {
+                    account_id: leaves[i].account_id,
+                    first: i - 1,
+                    second: i,
+                });
+            }
+            core::cmp::Ordering::Less => {
+                return Some(SumBuildError::Unsorted { index: i });
+            }
+        }
     }
     None
 }
@@ -436,6 +470,60 @@ impl MerkleSumTree {
             return Err(err);
         }
         Self::from_leaves(leaves).map_err(SumBuildError::Overflow)
+    }
+
+    /// Build a sum tree whose account ids are strictly increasing.
+    ///
+    /// Strict order implies uniqueness, so this is a [`Self::from_unique_leaves`]
+    /// tree that can also be binary-searched. The constructor does not sort:
+    /// reordering leaves would change the published root.
+    ///
+    /// ```
+    /// use merkle_tree::sum::{MerkleSumTree, SumBuildError, SumLeaf};
+    ///
+    /// let tree = MerkleSumTree::from_sorted_leaves([
+    ///     SumLeaf::new([1u8; 32], 40),
+    ///     SumLeaf::new([2u8; 32], 2),
+    ///     SumLeaf::new([3u8; 32], 8),
+    /// ])
+    /// .expect("sorted");
+    /// assert_eq!(tree.binary_search(&[2u8; 32]), Some(1));
+    ///
+    /// let err = MerkleSumTree::from_sorted_leaves([
+    ///     SumLeaf::new([2u8; 32], 2),
+    ///     SumLeaf::new([1u8; 32], 40),
+    /// ])
+    /// .expect_err("decreasing");
+    /// assert_eq!(err, SumBuildError::Unsorted { index: 1 });
+    /// ```
+    pub fn from_sorted_leaves<I>(leaves: I) -> Result<Self, SumBuildError>
+    where
+        I: IntoIterator<Item = SumLeaf>,
+    {
+        let leaves: Vec<SumLeaf> = leaves.into_iter().collect();
+        if let Some(err) = first_sorted_error(&leaves) {
+            return Err(err);
+        }
+        Self::from_leaves(leaves).map_err(SumBuildError::Overflow)
+    }
+
+    /// True when account ids are strictly increasing (empty and single-leaf
+    /// trees count as sorted).
+    pub fn is_sorted_unique(&self) -> bool {
+        self.leaves
+            .windows(2)
+            .all(|pair| pair[0].account_id < pair[1].account_id)
+    }
+
+    /// Index of `account_id` by binary search.
+    ///
+    /// The ids must be strictly increasing, as required by
+    /// [`Self::from_sorted_leaves`]. On an unsorted tree this may return
+    /// `None` even when the id is present; use [`Self::position`] then.
+    pub fn binary_search(&self, account_id: &AccountId) -> Option<usize> {
+        self.leaves
+            .binary_search_by(|leaf| leaf.account_id.cmp(account_id))
+            .ok()
     }
 
     /// Root hash and total, or `None` when the tree is empty.
@@ -1134,6 +1222,67 @@ mod tests {
                 right: 1
             })
         );
+    }
+
+    #[test]
+    fn from_sorted_leaves_matches_unique_when_ids_increase() {
+        let leaves = [leaf(1, 40), leaf(2, 2), leaf(3, 8)];
+        let sorted = MerkleSumTree::from_sorted_leaves(leaves).expect("sorted");
+        let unique = MerkleSumTree::from_unique_leaves(leaves).expect("unique");
+        assert_eq!(sorted, unique);
+        assert!(sorted.is_sorted_unique());
+        assert_eq!(sorted.binary_search(&[1u8; 32]), Some(0));
+        assert_eq!(sorted.binary_search(&[2u8; 32]), Some(1));
+        assert_eq!(sorted.binary_search(&[3u8; 32]), Some(2));
+        assert_eq!(sorted.binary_search(&[9u8; 32]), None);
+    }
+
+    #[test]
+    fn from_sorted_leaves_rejects_a_decrease() {
+        let err =
+            MerkleSumTree::from_sorted_leaves([leaf(2, 2), leaf(1, 40)]).expect_err("decreasing");
+        assert_eq!(err, SumBuildError::Unsorted { index: 1 });
+        assert!(err.to_string().contains("index 1"));
+    }
+
+    #[test]
+    fn from_sorted_leaves_rejects_adjacent_duplicates() {
+        let err =
+            MerkleSumTree::from_sorted_leaves([leaf(1, 10), leaf(1, 20)]).expect_err("duplicate");
+        assert_eq!(
+            err,
+            SumBuildError::Duplicate {
+                account_id: [1u8; 32],
+                first: 0,
+                second: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn empty_and_single_leaf_trees_are_sorted_unique() {
+        let empty = MerkleSumTree::from_sorted_leaves([]).expect("empty");
+        assert!(empty.is_sorted_unique());
+        assert_eq!(empty.binary_search(&[1u8; 32]), None);
+
+        let one = MerkleSumTree::from_sorted_leaves([leaf(4, 9)]).expect("one");
+        assert!(one.is_sorted_unique());
+        assert_eq!(one.binary_search(&[4u8; 32]), Some(0));
+    }
+
+    #[test]
+    fn unsorted_ids_are_found_by_position_and_agree_after_sorting() {
+        let tree = MerkleSumTree::from_leaves([leaf(3, 1), leaf(1, 1), leaf(2, 1)]).expect("fits");
+        assert!(!tree.is_sorted_unique());
+        assert_eq!(tree.position(&[1u8; 32]), Some(1));
+        assert_eq!(tree.position(&[3u8; 32]), Some(0));
+
+        let sorted = MerkleSumTree::from_sorted_leaves([leaf(1, 1), leaf(2, 1), leaf(3, 1)])
+            .expect("sorted");
+        for id in 1u8..=3 {
+            assert_eq!(sorted.binary_search(&[id; 32]), sorted.position(&[id; 32]));
+        }
+        assert_eq!(sorted.binary_search(&[9u8; 32]), None);
     }
 
     #[test]
