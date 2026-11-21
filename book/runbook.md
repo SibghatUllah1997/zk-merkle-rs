@@ -3,8 +3,8 @@
 The `merkle` binary is a small demo of the library. It needs the default
 `std` feature. Sum-tree commands also need `merkle_sum`. The commands are
 `merkle build`, `merkle prove`, `merkle verify`, and with `merkle_sum`,
-`merkle sum-build`, `merkle sum-prove`, `merkle sum-verify`, and
-`merkle solvency`.
+`merkle sum-build`, `merkle sum-prove`, `merkle sum-verify`,
+`merkle sum-absent`, `merkle sum-verify-absent`, and `merkle solvency`.
 
 ```bash
 cargo run --bin merkle -- help
@@ -91,6 +91,24 @@ cargo run --features merkle_sum --bin merkle -- sum-verify proof.txt --root <hex
 
 Pass the root and total the exchange published. Prints `ok` with the account
 and amount, or exits 1 and says whether the hash or the total failed.
+
+## Prove an account id is missing
+
+The CSV must be strictly sorted by account id. A present id exits 1.
+
+```bash
+cargo run --features merkle_sum --bin merkle -- sum-absent balances.csv --account <id-hex>
+```
+
+Prints `kind=absent` plus the neighbouring inclusion proofs. Redirect that
+to a file. Then:
+
+```bash
+cargo run --features merkle_sum --bin merkle -- sum-verify-absent absent.txt --root <hex> --sum <total>
+```
+
+Prints `ok` with the query account, or exits 1 if the neighbours do not
+bound the query or fail inclusion.
 
 ## Solvency check against your own snapshot
 

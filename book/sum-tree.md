@@ -119,6 +119,50 @@ assert!(proof.verify(&leaves[2], &root).is_ok());
 The root does not commit to the leaf count. The count in a proof only fixes
 the expected path shape; check it against the published count separately.
 
+## Unique and sorted leaves
+
+`from_leaves` still accepts a repeated account id, so existing snapshots
+keep compiling. `from_unique_leaves` refuses a duplicate, and
+`from_sorted_leaves` also requires strictly increasing ids. The
+constructors do not reorder rows: changing leaf order would change the
+published root.
+
+A sorted unique tree can be binary-searched, and it is the shape needed
+for a non-inclusion proof.
+
+## Non-inclusion
+
+`prove_absent(account_id)` returns two neighbouring inclusion proofs whose
+ids sandwich the query. Consecutive indices mean no leaf sits in the gap,
+so that id cannot be in the tree. A query below the first leaf (or above
+the last) uses only the right (or left) neighbour.
+
+```rust
+# #[cfg(feature = "merkle_sum")]
+# {
+use merkle_tree::sum::{MerkleSumTree, SumLeaf};
+
+let tree = MerkleSumTree::from_sorted_leaves([
+    SumLeaf::new([1u8; 32], 40),
+    SumLeaf::new([3u8; 32], 8),
+])
+.expect("sorted");
+let root = tree.root_node().expect("non-empty");
+let proof = tree.prove_absent(&[2u8; 32]).expect("missing");
+assert!(proof.verify(&root).is_ok());
+assert!(tree.prove_absent(&[1u8; 32]).is_none());
+# }
+```
+
+`merkle sum-absent <file> --account <hex>` prints that proof as
+`key=value` lines (`kind=absent`, the query, then `left.*` / `right.*`
+neighbour fields). `sum-verify-absent` checks it against the published
+root and total. The CSV must already be strictly sorted.
+
+An absence proof only shows that one id is missing from *this* tree. It
+does not show that every real customer was listed; see
+[Threat model](threat-model.md).
+
 ## Serde
 
 With the `serde` feature, `SumLeaf`, `SumNode` (the published root),

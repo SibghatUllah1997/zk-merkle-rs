@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-21
+
+- Unique and sorted sum-tree constructors refuse a repeated or decreasing account id
+- `prove_absent` shows a missing id sits between two neighbouring leaves of a sorted tree
+- `merkle sum-absent` / `sum-verify-absent` export and check that proof against the published root
+
 ## 2026-11-20 (demo and threat model)
 
 - Optional `verifyRangeProof` on the wasm module when `zk-range` is enabled

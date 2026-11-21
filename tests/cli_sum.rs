@@ -173,6 +173,61 @@ fn help_mentions_sum_prove_and_verify() {
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(text.contains("merkle sum-prove"));
     assert!(text.contains("merkle sum-verify"));
+    assert!(text.contains("merkle sum-absent"));
+    assert!(text.contains("merkle sum-verify-absent"));
+}
+
+#[test]
+fn sum_absent_then_verify_absent_via_the_binary() {
+    let csv = write_balances("zk-merkle-cli-sum-absent.csv");
+    let proof_path = std::env::temp_dir().join("zk-merkle-cli-sum-absent.txt");
+    let missing = to_hex32(&[9u8; 32]);
+
+    let out = merkle()
+        .args(["sum-absent", csv.to_str().unwrap(), "--account", &missing])
+        .output()
+        .expect("run merkle");
+    assert!(
+        out.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    std::fs::write(&proof_path, &out.stdout).expect("write proof");
+
+    let present = merkle()
+        .args([
+            "sum-absent",
+            csv.to_str().unwrap(),
+            "--account",
+            &to_hex32(&[2u8; 32]),
+        ])
+        .output()
+        .expect("run merkle");
+    assert_eq!(present.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&present.stderr).contains("use sum-prove"));
+
+    let root = balances_root();
+    let ok = merkle()
+        .args([
+            "sum-verify-absent",
+            proof_path.to_str().unwrap(),
+            "--root",
+            &root,
+            "--sum",
+            "1500",
+        ])
+        .output()
+        .expect("run merkle");
+    let _ = std::fs::remove_file(&csv);
+    let _ = std::fs::remove_file(&proof_path);
+    assert!(
+        ok.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&ok.stderr)
+    );
+    let printed = String::from_utf8(ok.stdout).unwrap();
+    assert!(printed.contains("absent"));
+    assert!(printed.contains(&missing));
 }
 
 /// Root and total that `sum-build` prints for `write_balances` (sum 1500).

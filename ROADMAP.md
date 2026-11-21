@@ -59,4 +59,4 @@ that some other account id is absent. That needs unique, strictly sorted
 ids so two neighbouring leaves can bound a missing id.
 
 43. [x] Reject duplicate account ids when building with `from_unique_leaves`
-44. [ ] Add `from_sorted_leaves`, binary search, and a non-inclusion proof for a missing account
+44. [x] Add `from_sorted_leaves`, binary search, and a non-inclusion proof for a missing account

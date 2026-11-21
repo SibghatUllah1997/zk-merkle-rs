@@ -38,6 +38,17 @@ pub enum Command {
         root: [u8; 32],
         sum: u128,
     },
+    /// Export a non-inclusion proof for an account missing from a sorted CSV.
+    SumAbsent {
+        path: String,
+        account: [u8; 32],
+    },
+    /// Check an exported absence proof against a published root and total.
+    SumVerifyAbsent {
+        path: String,
+        root: [u8; 32],
+        sum: u128,
+    },
     /// Compare a published root and total with a liabilities snapshot CSV.
     Solvency {
         path: String,
@@ -67,6 +78,8 @@ pub enum CliError {
     Io(String),
     InvalidSum(String),
     AccountNotFound(String),
+    /// The account is present; `sum-absent` only proves a missing id.
+    AccountPresent(String),
     /// The solvency report found a mismatch; the payload is the full report.
     SolvencyMismatch(String),
     #[cfg(feature = "merkle_sum")]
@@ -77,6 +90,10 @@ pub enum CliError {
     SumCsv(crate::sum::SumCsvError),
     #[cfg(feature = "merkle_sum")]
     SumOverflow(crate::sum::SumOverflow),
+    #[cfg(feature = "merkle_sum")]
+    SumBuild(crate::sum::SumBuildError),
+    #[cfg(feature = "merkle_sum")]
+    Absence(crate::sum::AbsenceError),
 }
 
 impl std::fmt::Display for CliError {
@@ -102,6 +119,9 @@ impl std::fmt::Display for CliError {
                 write!(f, "invalid total {raw:?}; expected a decimal u128")
             }
             CliError::AccountNotFound(id) => write!(f, "account {id} is not in the CSV"),
+            CliError::AccountPresent(id) => {
+                write!(f, "account {id} is in the CSV; use sum-prove for inclusion")
+            }
             CliError::SolvencyMismatch(report) => write!(f, "{}", report.trim_end()),
             #[cfg(feature = "merkle_sum")]
             CliError::SumProof(err) => write!(f, "verification failed: {err}"),
@@ -111,6 +131,10 @@ impl std::fmt::Display for CliError {
             CliError::SumCsv(err) => write!(f, "{err}"),
             #[cfg(feature = "merkle_sum")]
             CliError::SumOverflow(err) => write!(f, "{err}"),
+            #[cfg(feature = "merkle_sum")]
+            CliError::SumBuild(err) => write!(f, "{err}"),
+            #[cfg(feature = "merkle_sum")]
+            CliError::Absence(err) => write!(f, "verification failed: {err}"),
         }
     }
 }
@@ -128,6 +152,10 @@ impl std::error::Error for CliError {
             CliError::SumProof(err) => Some(err),
             #[cfg(feature = "merkle_sum")]
             CliError::SumProofText(err) => Some(err),
+            #[cfg(feature = "merkle_sum")]
+            CliError::SumBuild(crate::sum::SumBuildError::Overflow(err)) => Some(err),
+            #[cfg(feature = "merkle_sum")]
+            CliError::Absence(err) => Some(err),
             _ => None,
         }
     }
@@ -163,11 +191,14 @@ pub fn usage() -> &'static str {
         "    merkle sum-build <csv-file>\n",
         "    merkle sum-prove <csv-file> --account <hex>\n",
         "    merkle sum-verify <proof-file> --root <hex> --sum <total>\n",
+        "    merkle sum-absent <csv-file> --account <hex>\n",
+        "    merkle sum-verify-absent <proof-file> --root <hex> --sum <total>\n",
         "    merkle solvency <csv-file> --root <hex> --sum <total> [--reserves <amount>]\n",
         "    merkle help\n\n",
         "Leaves are UTF-8 strings. Proof steps are comma-separated L:/R: hex tokens.\n",
         "sum-build reads account_id,amount CSV (32-byte hex id, decimal u128) and needs merkle_sum.\n",
         "sum-prove prints a proof file for one account; sum-verify checks it against the published root and sum.\n",
+        "sum-absent prints a non-inclusion proof for a missing id in a strictly sorted CSV; sum-verify-absent checks it.\n",
         "solvency rebuilds the tree from your own liabilities CSV and compares it with the published root and sum."
     )
 }
@@ -191,6 +222,8 @@ where
         "sum-build" => parse_sum_build(args),
         "sum-prove" => parse_sum_prove(args),
         "sum-verify" => parse_sum_verify(args),
+        "sum-absent" => parse_sum_absent(args),
+        "sum-verify-absent" => parse_sum_verify_absent(args),
         "solvency" => parse_solvency(args),
         other => Err(CliError::UnknownCommand(String::from(other))),
     }
@@ -450,6 +483,46 @@ where
     Ok(Command::SumVerify { path, root, sum })
 }
 
+fn parse_sum_absent<I, S>(args: I) -> Result<Command, CliError>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let (path, values) = match parse_file_and_flags(args, "sum-absent", &["--account"])? {
+        None => return Ok(Command::Help),
+        Some(parsed) => parsed,
+    };
+    let account = values[0]
+        .as_deref()
+        .ok_or(CliError::MissingValue("--account"))?;
+    let account = crate::try_from_hex32(account).map_err(CliError::Hex)?;
+    Ok(Command::SumAbsent { path, account })
+}
+
+fn parse_sum_verify_absent<I, S>(args: I) -> Result<Command, CliError>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let (path, values) =
+        match parse_file_and_flags(args, "sum-verify-absent", &["--root", "--sum"])? {
+            None => return Ok(Command::Help),
+            Some(parsed) => parsed,
+        };
+    let root = parse_root(
+        values[0]
+            .as_deref()
+            .ok_or(CliError::MissingValue("--root"))?,
+    )?;
+    let raw_sum = values[1]
+        .as_deref()
+        .ok_or(CliError::MissingValue("--sum"))?;
+    let sum = raw_sum
+        .parse::<u128>()
+        .map_err(|_| CliError::InvalidSum(String::from(raw_sum)))?;
+    Ok(Command::SumVerifyAbsent { path, root, sum })
+}
+
 fn parse_amount(raw: &str) -> Result<u128, CliError> {
     raw.parse::<u128>()
         .map_err(|_| CliError::InvalidSum(String::from(raw)))
@@ -503,6 +576,8 @@ pub fn run(command: Command) -> Result<String, CliError> {
         Command::SumBuild { path } => run_sum_build(&path),
         Command::SumProve { path, account } => run_sum_prove(&path, &account),
         Command::SumVerify { path, root, sum } => run_sum_verify(&path, root, sum),
+        Command::SumAbsent { path, account } => run_sum_absent(&path, &account),
+        Command::SumVerifyAbsent { path, root, sum } => run_sum_verify_absent(&path, root, sum),
         Command::Solvency {
             path,
             root,
@@ -627,6 +702,49 @@ fn run_sum_verify(path: &str, root: [u8; 32], sum: u128) -> Result<String, CliEr
             "ok\naccount={}\namount={}\n",
             crate::to_hex32(&leaf.account_id),
             leaf.amount
+        ))
+    }
+}
+
+fn run_sum_absent(path: &str, account: &[u8; 32]) -> Result<String, CliError> {
+    #[cfg(not(feature = "merkle_sum"))]
+    {
+        let _ = (path, account);
+        Err(needs_merkle_sum("sum-absent"))
+    }
+    #[cfg(feature = "merkle_sum")]
+    {
+        use crate::sum::{parse_sum_csv, sum_absent_to_text, MerkleSumTree};
+
+        let leaves = parse_sum_csv(&read_file(path)?).map_err(CliError::SumCsv)?;
+        let tree = MerkleSumTree::from_sorted_leaves(leaves).map_err(CliError::SumBuild)?;
+        if tree.position(account).is_some() {
+            return Err(CliError::AccountPresent(crate::to_hex32(account)));
+        }
+        let proof = tree
+            .prove_absent(account)
+            .expect("sorted non-empty CSV and a missing id");
+        Ok(sum_absent_to_text(&proof))
+    }
+}
+
+fn run_sum_verify_absent(path: &str, root: [u8; 32], sum: u128) -> Result<String, CliError> {
+    #[cfg(not(feature = "merkle_sum"))]
+    {
+        let _ = (path, root, sum);
+        Err(needs_merkle_sum("sum-verify-absent"))
+    }
+    #[cfg(feature = "merkle_sum")]
+    {
+        use crate::sum::{parse_sum_absent_text, SumNode};
+
+        let proof = parse_sum_absent_text(&read_file(path)?).map_err(CliError::SumProofText)?;
+        proof
+            .verify(&SumNode::new(root, sum))
+            .map_err(CliError::Absence)?;
+        Ok(format!(
+            "ok\naccount={}\nabsent\n",
+            crate::to_hex32(&proof.query)
         ))
     }
 }
@@ -981,6 +1099,29 @@ mod tests {
             parse_args(args(&["sum-verify", "--help"])).unwrap(),
             Command::Help
         );
+        assert_eq!(
+            parse_args(args(&["sum-absent", "b.csv", "--account", &id])).unwrap(),
+            Command::SumAbsent {
+                path: String::from("b.csv"),
+                account: [7u8; 32],
+            }
+        );
+        assert_eq!(
+            parse_args(args(&[
+                "sum-verify-absent",
+                "p.txt",
+                "--root",
+                &root,
+                "--sum",
+                "50"
+            ]))
+            .unwrap(),
+            Command::SumVerifyAbsent {
+                path: String::from("p.txt"),
+                root: [8u8; 32],
+                sum: 50,
+            }
+        );
     }
 
     #[cfg(feature = "merkle_sum")]
@@ -1035,6 +1176,62 @@ mod tests {
         let _ = std::fs::remove_file(&proof_path);
     }
 
+    #[cfg(feature = "merkle_sum")]
+    #[test]
+    fn sum_absent_then_verify_absent_round_trips_through_files() {
+        let dir = std::env::temp_dir();
+        let csv = dir.join("zk-merkle-unit-sum-absent.csv");
+        let proof_path = dir.join("zk-merkle-unit-sum-absent.txt");
+        let (a, b, c) = (
+            to_hex32(&[1u8; 32]),
+            to_hex32(&[2u8; 32]),
+            to_hex32(&[3u8; 32]),
+        );
+        std::fs::write(&csv, format!("account_id,amount\n{a},40\n{b},2\n{c},8\n")).unwrap();
+        let missing = to_hex32(&[4u8; 32]);
+
+        let built = run_from_args(args(&["sum-build", csv.to_str().unwrap()])).unwrap();
+        let root = built
+            .lines()
+            .next()
+            .unwrap()
+            .trim_start_matches("root=")
+            .to_string();
+        let proof = run_from_args(args(&[
+            "sum-absent",
+            csv.to_str().unwrap(),
+            "--account",
+            &missing,
+        ]))
+        .unwrap();
+        assert!(proof.starts_with(&format!("kind=absent\naccount={missing}\n")));
+        std::fs::write(&proof_path, &proof).unwrap();
+
+        let p = proof_path.to_str().unwrap();
+        let ok = run_from_args(args(&[
+            "sum-verify-absent",
+            p,
+            "--root",
+            &root,
+            "--sum",
+            "50",
+        ]))
+        .unwrap();
+        assert_eq!(ok, format!("ok\naccount={missing}\nabsent\n"));
+
+        let err = run_from_args(args(&[
+            "sum-absent",
+            csv.to_str().unwrap(),
+            "--account",
+            &b,
+        ]))
+        .unwrap_err();
+        assert_eq!(err, CliError::AccountPresent(b));
+
+        let _ = std::fs::remove_file(&csv);
+        let _ = std::fs::remove_file(&proof_path);
+    }
+
     #[cfg(not(feature = "merkle_sum"))]
     #[test]
     fn sum_prove_and_verify_explain_the_feature() {
@@ -1043,6 +1240,18 @@ mod tests {
         assert!(err.to_string().contains("merkle_sum"));
         let err =
             run_from_args(args(&["sum-verify", "p.txt", "--root", &id, "--sum", "1"])).unwrap_err();
+        assert!(err.to_string().contains("merkle_sum"));
+        let err = run_from_args(args(&["sum-absent", "x.csv", "--account", &id])).unwrap_err();
+        assert!(err.to_string().contains("merkle_sum"));
+        let err = run_from_args(args(&[
+            "sum-verify-absent",
+            "p.txt",
+            "--root",
+            &id,
+            "--sum",
+            "1",
+        ]))
+        .unwrap_err();
         assert!(err.to_string().contains("merkle_sum"));
     }
 

@@ -50,8 +50,10 @@ is invisible:
 
 `merkle solvency` catches a mismatch only if the auditor's own CSV is
 complete. If both the published tree and the auditor snapshot omit the
-same accounts, they will agree and still be wrong. Users should treat
-"not in the tree" as "not proven", not as "zero".
+same accounts, they will agree and still be wrong. A non-inclusion proof
+shows that one id is absent from *this* tree, not that every real
+customer was listed. Users should treat "not in the tree" as "not
+proven", not as "zero".
 
 ## Timing
 
