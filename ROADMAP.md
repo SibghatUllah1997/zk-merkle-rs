@@ -51,3 +51,12 @@ Each item is one small, shippable step. Hashing and range proofs must use audite
 40. [x] Add solvency tooling that compares a published `total_sum` to an independently computed liabilities snapshot
 41. [x] Add a `wasm-bindgen` verifier for inclusion proofs and, optionally, range proofs
 42. [x] Add a small demo page, CLI runbook, and threat-model notes (valuation, excluded accounts, timing)
+
+## Phase 3: Sorted uniqueness and non-inclusion
+
+Inclusion shows that one account is in the published tree. It does not show
+that some other account id is absent. That needs unique, strictly sorted
+ids so two neighbouring leaves can bound a missing id.
+
+43. [x] Reject duplicate account ids when building with `from_unique_leaves`
+44. [ ] Add `from_sorted_leaves`, binary search, and a non-inclusion proof for a missing account

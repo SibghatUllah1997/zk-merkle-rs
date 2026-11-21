@@ -35,10 +35,13 @@
 
 #[cfg(not(feature = "std"))]
 use alloc::{
+    collections::BTreeMap,
     format,
     string::{String, ToString},
     vec::Vec,
 };
+#[cfg(feature = "std")]
+use std::collections::BTreeMap;
 
 use sha2::{Digest, Sha256};
 
@@ -154,6 +157,75 @@ impl core::fmt::Display for SumOverflow {
 
 #[cfg(feature = "std")]
 impl std::error::Error for SumOverflow {}
+
+/// Why a unique or sorted Merkle sum tree could not be built.
+///
+/// [`MerkleSumTree::from_leaves`] still accepts duplicate ids so existing
+/// snapshots keep compiling. [`MerkleSumTree::from_unique_leaves`] is the
+/// constructor that refuses them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SumBuildError {
+    /// A parent total overflowed `u128`.
+    Overflow(SumOverflow),
+    /// The same account id appeared at two leaf indices.
+    Duplicate {
+        /// Repeated account identifier.
+        account_id: AccountId,
+        /// First leaf that used this id.
+        first: usize,
+        /// Later leaf that reused it.
+        second: usize,
+    },
+}
+
+impl core::fmt::Display for SumBuildError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            SumBuildError::Overflow(err) => write!(f, "{err}"),
+            SumBuildError::Duplicate {
+                account_id,
+                first,
+                second,
+            } => write!(
+                f,
+                "account {} appears at index {first} and {second}",
+                to_hex32(account_id)
+            ),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for SumBuildError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            SumBuildError::Overflow(err) => Some(err),
+            SumBuildError::Duplicate { .. } => None,
+        }
+    }
+}
+
+impl From<SumOverflow> for SumBuildError {
+    fn from(err: SumOverflow) -> Self {
+        SumBuildError::Overflow(err)
+    }
+}
+
+/// First repeated account id, if any, with the two indices that share it.
+fn first_duplicate(leaves: &[SumLeaf]) -> Option<SumBuildError> {
+    let mut seen = BTreeMap::new();
+    for (index, leaf) in leaves.iter().enumerate() {
+        if let Some(&first) = seen.get(&leaf.account_id) {
+            return Some(SumBuildError::Duplicate {
+                account_id: leaf.account_id,
+                first,
+                second: index,
+            });
+        }
+        seen.insert(leaf.account_id, index);
+    }
+    None
+}
 
 /// A problem reading Merkle sum leaves from CSV text.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -322,6 +394,48 @@ impl MerkleSumTree {
         }
 
         Ok(Self { leaves, layers })
+    }
+
+    /// Build a sum tree, refusing any repeated account id.
+    ///
+    /// Duplicate ids let one balance be counted twice or split across two
+    /// leaves, so a per-account inclusion proof no longer matches the total.
+    /// [`Self::from_leaves`] still allows them; this constructor is the one
+    /// an exchange should use before publishing.
+    ///
+    /// ```
+    /// use merkle_tree::sum::{MerkleSumTree, SumBuildError, SumLeaf};
+    ///
+    /// let ok = MerkleSumTree::from_unique_leaves([
+    ///     SumLeaf::new([1u8; 32], 40),
+    ///     SumLeaf::new([2u8; 32], 2),
+    /// ])
+    /// .expect("unique");
+    /// assert_eq!(ok.root().map(|r| r.1), Some(42));
+    ///
+    /// let err = MerkleSumTree::from_unique_leaves([
+    ///     SumLeaf::new([1u8; 32], 40),
+    ///     SumLeaf::new([1u8; 32], 2),
+    /// ])
+    /// .expect_err("duplicate");
+    /// assert!(matches!(
+    ///     err,
+    ///     SumBuildError::Duplicate {
+    ///         first: 0,
+    ///         second: 1,
+    ///         ..
+    ///     }
+    /// ));
+    /// ```
+    pub fn from_unique_leaves<I>(leaves: I) -> Result<Self, SumBuildError>
+    where
+        I: IntoIterator<Item = SumLeaf>,
+    {
+        let leaves: Vec<SumLeaf> = leaves.into_iter().collect();
+        if let Some(err) = first_duplicate(&leaves) {
+            return Err(err);
+        }
+        Self::from_leaves(leaves).map_err(SumBuildError::Overflow)
     }
 
     /// Root hash and total, or `None` when the tree is empty.
@@ -971,6 +1085,54 @@ mod tests {
                 left: u128::MAX,
                 right: 1
             }
+        );
+    }
+
+    #[test]
+    fn from_unique_leaves_matches_from_leaves_when_ids_are_distinct() {
+        let leaves = [leaf(1, 40), leaf(2, 2), leaf(3, 8)];
+        let unique = MerkleSumTree::from_unique_leaves(leaves).expect("unique");
+        let plain = MerkleSumTree::from_leaves(leaves).expect("fits");
+        assert_eq!(unique, plain);
+        assert_eq!(unique.root().map(|r| r.1), Some(50));
+    }
+
+    #[test]
+    fn from_unique_leaves_rejects_a_repeated_account() {
+        let err =
+            MerkleSumTree::from_unique_leaves([leaf(1, 10), leaf(2, 20), leaf(1, 30), leaf(3, 40)])
+                .expect_err("duplicate");
+        assert_eq!(
+            err,
+            SumBuildError::Duplicate {
+                account_id: [1u8; 32],
+                first: 0,
+                second: 2,
+            }
+        );
+        assert!(err.to_string().contains(&to_hex32(&[1u8; 32])));
+        assert!(err.to_string().contains("index 0 and 2"));
+    }
+
+    #[test]
+    fn from_leaves_still_allows_duplicate_ids() {
+        let tree =
+            MerkleSumTree::from_leaves([leaf(7, 1), leaf(7, 2)]).expect("duplicates still build");
+        assert_eq!(tree.len(), 2);
+        assert_eq!(tree.root().map(|r| r.1), Some(3));
+        assert_eq!(tree.position(&[7u8; 32]), Some(0));
+    }
+
+    #[test]
+    fn from_unique_leaves_surfaces_overflow() {
+        let err = MerkleSumTree::from_unique_leaves([leaf(1, u128::MAX), leaf(2, 1)])
+            .expect_err("overflow");
+        assert_eq!(
+            err,
+            SumBuildError::Overflow(SumOverflow {
+                left: u128::MAX,
+                right: 1
+            })
         );
     }
 

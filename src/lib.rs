@@ -138,8 +138,8 @@ pub use range::{
 pub use solvency::{compare_liabilities, SolvencyError, SolvencyReport, TotalStatus};
 #[cfg(feature = "merkle_sum")]
 pub use sum::{
-    parse_sum_csv, parse_sum_proof_text, sum_proof_to_text, AccountId, MerkleSumTree, SumCsvError,
-    SumInclusionProof, SumLeaf, SumNode, SumOverflow, SumProofError, SumProofStep,
-    SumProofTextError,
+    parse_sum_csv, parse_sum_proof_text, sum_proof_to_text, AccountId, MerkleSumTree,
+    SumBuildError, SumCsvError, SumInclusionProof, SumLeaf, SumNode, SumOverflow, SumProofError,
+    SumProofStep, SumProofTextError,
 };
 pub use tree::{LeafInfo, MerkleRoot, MerkleTree};
