@@ -1168,6 +1168,223 @@ pub fn parse_sum_proof_text(text: &str) -> Result<(SumLeaf, SumInclusionProof), 
     Ok((leaf, proof))
 }
 
+fn write_absence_neighbor(out: &mut String, prefix: &str, neighbor: &SumAbsenceNeighbor) {
+    out.push_str(&format!(
+        "{prefix}.account={}\n{prefix}.amount={}\n{prefix}.index={}\n{prefix}.leaf_count={}\n",
+        to_hex32(&neighbor.leaf.account_id),
+        neighbor.leaf.amount,
+        neighbor.proof.leaf_index,
+        neighbor.proof.leaf_count,
+    ));
+    for step in &neighbor.proof.steps {
+        out.push_str(&format!(
+            "{prefix}.step={}:{}:{}\n",
+            step.side.as_char(),
+            to_hex32(&step.sibling.hash),
+            step.sibling.sum
+        ));
+    }
+}
+
+/// Render an absence proof as `key=value` lines.
+///
+/// ```text
+/// kind=absent
+/// account=<query hex>
+/// left.account=...
+/// left.amount=...
+/// left.index=...
+/// left.leaf_count=...
+/// left.step=<L|R>:<hash>:<sum>
+/// right.account=...
+/// ```
+///
+/// A query below the first leaf omits every `left.*` key; a query above the
+/// last leaf omits `right.*`. The published root is left out on purpose.
+///
+/// ```
+/// use merkle_tree::sum::{
+///     parse_sum_absent_text, sum_absent_to_text, MerkleSumTree, SumLeaf,
+/// };
+///
+/// let tree = MerkleSumTree::from_sorted_leaves([
+///     SumLeaf::new([1u8; 32], 40),
+///     SumLeaf::new([3u8; 32], 8),
+/// ])
+/// .unwrap();
+/// let proof = tree.prove_absent(&[2u8; 32]).unwrap();
+/// let text = sum_absent_to_text(&proof);
+/// let parsed = parse_sum_absent_text(&text).unwrap();
+/// assert_eq!(parsed, proof);
+/// assert!(parsed.verify(&tree.root_node().unwrap()).is_ok());
+/// ```
+pub fn sum_absent_to_text(proof: &SumAbsenceProof) -> String {
+    let mut out = format!("kind=absent\naccount={}\n", to_hex32(&proof.query));
+    if let Some(left) = &proof.left {
+        write_absence_neighbor(&mut out, "left", left);
+    }
+    if let Some(right) = &proof.right {
+        write_absence_neighbor(&mut out, "right", right);
+    }
+    out
+}
+
+struct NeighborSlots {
+    account: Option<AccountId>,
+    amount: Option<u128>,
+    index: Option<usize>,
+    leaf_count: Option<usize>,
+    steps: Vec<SumProofStep>,
+}
+
+impl NeighborSlots {
+    fn new() -> Self {
+        Self {
+            account: None,
+            amount: None,
+            index: None,
+            leaf_count: None,
+            steps: Vec::new(),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.account.is_none()
+            && self.amount.is_none()
+            && self.index.is_none()
+            && self.leaf_count.is_none()
+            && self.steps.is_empty()
+    }
+
+    fn finish(
+        self,
+        account_key: &'static str,
+        amount_key: &'static str,
+        index_key: &'static str,
+        count_key: &'static str,
+    ) -> Result<Option<SumAbsenceNeighbor>, SumProofTextError> {
+        if self.is_empty() {
+            return Ok(None);
+        }
+        let leaf = SumLeaf::new(
+            self.account
+                .ok_or(SumProofTextError::Missing(account_key))?,
+            self.amount.ok_or(SumProofTextError::Missing(amount_key))?,
+        );
+        let proof = SumInclusionProof {
+            leaf_index: self.index.ok_or(SumProofTextError::Missing(index_key))?,
+            leaf_count: self
+                .leaf_count
+                .ok_or(SumProofTextError::Missing(count_key))?,
+            steps: self.steps,
+        };
+        Ok(Some(SumAbsenceNeighbor { leaf, proof }))
+    }
+}
+
+/// Parse text written by [`sum_absent_to_text`].
+///
+/// Blank lines and `#` comments are skipped. Unknown keys are rejected.
+/// Parsing does not verify; call [`SumAbsenceProof::verify`] with the
+/// published root afterwards.
+pub fn parse_sum_absent_text(text: &str) -> Result<SumAbsenceProof, SumProofTextError> {
+    let mut kind = None;
+    let mut query = None;
+    let mut left = NeighborSlots::new();
+    let mut right = NeighborSlots::new();
+
+    for (idx, raw) in text.lines().enumerate() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let bad = |message: String| SumProofTextError::BadLine {
+            line: idx + 1,
+            message,
+        };
+        let (key, value) = line
+            .split_once('=')
+            .ok_or_else(|| bad(String::from("expected key=value")))?;
+        let value = value.trim();
+        match key.trim() {
+            "kind" => {
+                if value != "absent" {
+                    return Err(bad(format!("expected kind=absent, got {value:?}")));
+                }
+                set_once(&mut kind, (), "kind")?;
+            }
+            "account" => {
+                let id = try_from_hex32(value).map_err(|err| bad(err.to_string()))?;
+                set_once(&mut query, id, "account")?;
+            }
+            "left.account" => {
+                let id = try_from_hex32(value).map_err(|err| bad(err.to_string()))?;
+                set_once(&mut left.account, id, "left.account")?;
+            }
+            "left.amount" => {
+                let v = value
+                    .parse::<u128>()
+                    .map_err(|_| bad(format!("invalid amount {value:?}")))?;
+                set_once(&mut left.amount, v, "left.amount")?;
+            }
+            "left.index" => {
+                let v = value
+                    .parse::<usize>()
+                    .map_err(|_| bad(format!("invalid index {value:?}")))?;
+                set_once(&mut left.index, v, "left.index")?;
+            }
+            "left.leaf_count" => {
+                let v = value
+                    .parse::<usize>()
+                    .map_err(|_| bad(format!("invalid leaf_count {value:?}")))?;
+                set_once(&mut left.leaf_count, v, "left.leaf_count")?;
+            }
+            "left.step" => left.steps.push(parse_sum_step(value).map_err(bad)?),
+            "right.account" => {
+                let id = try_from_hex32(value).map_err(|err| bad(err.to_string()))?;
+                set_once(&mut right.account, id, "right.account")?;
+            }
+            "right.amount" => {
+                let v = value
+                    .parse::<u128>()
+                    .map_err(|_| bad(format!("invalid amount {value:?}")))?;
+                set_once(&mut right.amount, v, "right.amount")?;
+            }
+            "right.index" => {
+                let v = value
+                    .parse::<usize>()
+                    .map_err(|_| bad(format!("invalid index {value:?}")))?;
+                set_once(&mut right.index, v, "right.index")?;
+            }
+            "right.leaf_count" => {
+                let v = value
+                    .parse::<usize>()
+                    .map_err(|_| bad(format!("invalid leaf_count {value:?}")))?;
+                set_once(&mut right.leaf_count, v, "right.leaf_count")?;
+            }
+            "right.step" => right.steps.push(parse_sum_step(value).map_err(bad)?),
+            other => return Err(bad(format!("unknown key {other:?}"))),
+        }
+    }
+
+    kind.ok_or(SumProofTextError::Missing("kind"))?;
+    Ok(SumAbsenceProof {
+        query: query.ok_or(SumProofTextError::Missing("account"))?,
+        left: left.finish(
+            "left.account",
+            "left.amount",
+            "left.index",
+            "left.leaf_count",
+        )?,
+        right: right.finish(
+            "right.account",
+            "right.amount",
+            "right.index",
+            "right.leaf_count",
+        )?,
+    })
+}
+
 impl MerkleSumTree {
     /// Index of the first leaf whose account id is `account_id`.
     pub fn position(&self, account_id: &AccountId) -> Option<usize> {
@@ -1532,6 +1749,129 @@ mod tests {
 
         let unsorted = MerkleSumTree::from_leaves([leaf(3, 1), leaf(1, 1)]).expect("fits");
         assert!(unsorted.prove_absent(&[2u8; 32]).is_none());
+    }
+
+    #[test]
+    fn absence_rejects_non_adjacent_neighbours() {
+        let leaves = [leaf(1, 10), leaf(3, 20), leaf(5, 30)];
+        let tree = MerkleSumTree::from_sorted_leaves(leaves).expect("sorted");
+        let root = tree.root_node().unwrap();
+        let mut proof = tree.prove_absent(&[2u8; 32]).expect("missing");
+        proof.right = Some(SumAbsenceNeighbor {
+            leaf: leaves[2],
+            proof: tree.prove(2).unwrap(),
+        });
+        assert_eq!(
+            proof.verify(&root),
+            Err(AbsenceError::NotAdjacent { left: 0, right: 2 })
+        );
+    }
+
+    #[test]
+    fn absence_rejects_a_query_on_a_neighbour_id() {
+        let tree = MerkleSumTree::from_sorted_leaves([leaf(1, 10), leaf(3, 20)]).expect("sorted");
+        let root = tree.root_node().unwrap();
+        let mut proof = tree.prove_absent(&[2u8; 32]).expect("missing");
+        proof.query = [1u8; 32];
+        assert_eq!(proof.verify(&root), Err(AbsenceError::NotBounded));
+    }
+
+    #[test]
+    fn absence_rejects_a_tampered_neighbour_amount() {
+        let tree = MerkleSumTree::from_sorted_leaves([leaf(1, 10), leaf(3, 20)]).expect("sorted");
+        let root = tree.root_node().unwrap();
+        let mut proof = tree.prove_absent(&[2u8; 32]).expect("missing");
+        proof.left.as_mut().unwrap().leaf.amount = 11;
+        assert_eq!(
+            proof.verify(&root),
+            Err(AbsenceError::Inclusion(SumProofError::HashMismatch))
+        );
+    }
+
+    #[test]
+    fn absence_rejects_end_gaps_that_are_not_the_first_or_last_leaf() {
+        let tree = MerkleSumTree::from_sorted_leaves([leaf(2, 1), leaf(4, 1)]).expect("sorted");
+        let root = tree.root_node().unwrap();
+        let second = SumAbsenceNeighbor {
+            leaf: leaf(4, 1),
+            proof: tree.prove(1).unwrap(),
+        };
+        let first = SumAbsenceNeighbor {
+            leaf: leaf(2, 1),
+            proof: tree.prove(0).unwrap(),
+        };
+
+        let mut below = tree.prove_absent(&[1u8; 32]).expect("below");
+        below.right = Some(second.clone());
+        assert_eq!(
+            below.verify(&root),
+            Err(AbsenceError::NotFirst { index: 1 })
+        );
+
+        let mut above = tree.prove_absent(&[9u8; 32]).expect("above");
+        above.left = Some(first);
+        assert_eq!(
+            above.verify(&root),
+            Err(AbsenceError::NotLast {
+                index: 0,
+                leaf_count: 2
+            })
+        );
+    }
+
+    #[test]
+    fn absence_rejects_empty_neighbours_and_leaf_count_mismatch() {
+        let tree = MerkleSumTree::from_sorted_leaves([leaf(1, 10), leaf(3, 20), leaf(5, 30)])
+            .expect("sorted");
+        let root = tree.root_node().unwrap();
+        let mut proof = tree.prove_absent(&[2u8; 32]).expect("missing");
+        proof.left = None;
+        proof.right = None;
+        assert_eq!(proof.verify(&root), Err(AbsenceError::EmptyNeighbors));
+
+        let mut proof = tree.prove_absent(&[2u8; 32]).expect("missing");
+        proof.left.as_mut().unwrap().proof.leaf_count = 4;
+        assert_eq!(
+            proof.verify(&root),
+            Err(AbsenceError::LeafCountMismatch { left: 4, right: 3 })
+        );
+    }
+
+    #[test]
+    fn absence_text_round_trips_and_still_verifies() {
+        let tree = MerkleSumTree::from_sorted_leaves([leaf(1, 10), leaf(3, 20), leaf(5, 30)])
+            .expect("sorted");
+        let root = tree.root_node().unwrap();
+        for id in [0u8, 2, 4, 9] {
+            let proof = tree.prove_absent(&[id; 32]).expect("missing");
+            let text = sum_absent_to_text(&proof);
+            let parsed = parse_sum_absent_text(&text).expect("parse");
+            assert_eq!(parsed, proof);
+            assert_eq!(parsed.verify(&root), Ok(()));
+        }
+        let noisy = format!(
+            "# gap\n\n{}\n",
+            sum_absent_to_text(&tree.prove_absent(&[2u8; 32]).unwrap())
+        );
+        assert!(parse_sum_absent_text(&noisy).unwrap().verify(&root).is_ok());
+    }
+
+    #[test]
+    fn absence_text_rejects_bad_input() {
+        let tree = MerkleSumTree::from_sorted_leaves([leaf(1, 10), leaf(3, 20)]).expect("sorted");
+        let text = sum_absent_to_text(&tree.prove_absent(&[2u8; 32]).unwrap());
+        assert_eq!(
+            parse_sum_absent_text("").unwrap_err(),
+            SumProofTextError::Missing("kind")
+        );
+        assert!(matches!(
+            parse_sum_absent_text(&format!("{text}colour=blue\n")).unwrap_err(),
+            SumProofTextError::BadLine { .. }
+        ));
+        assert!(matches!(
+            parse_sum_absent_text("kind=inclusion\naccount=00\n").unwrap_err(),
+            SumProofTextError::BadLine { .. }
+        ));
     }
 
     #[test]

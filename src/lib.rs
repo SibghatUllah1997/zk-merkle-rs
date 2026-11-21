@@ -57,7 +57,7 @@
 //! - [`chunk`] — split byte buffers into fixed-size leaves
 //! - [`log`] — append-only log with successive Merkle-root checkpoints
 //! - [`features`] — which optional crate features this build compiled with
-//! - `sum` (feature `merkle_sum`) — Merkle sum tree, inclusion proofs, CSV leaves, layer totals, and serde-ready roots
+//! - `sum` (feature `merkle_sum`) — Merkle sum tree, inclusion proofs, sorted unique leaves, non-inclusion proofs, CSV leaves, layer totals, and serde-ready roots
 //! - `solvency` (feature `merkle_sum`) — compare a published root and total with an independent liabilities snapshot
 //! - `range` (feature `zk-range`) — 64-bit Halo 2 range-check circuit (`0 <= amount < 2^64`)
 //! - `wasm` (feature `wasm`) — wasm-bindgen verifier for plain and sum-tree inclusion proofs
@@ -138,8 +138,9 @@ pub use range::{
 pub use solvency::{compare_liabilities, SolvencyError, SolvencyReport, TotalStatus};
 #[cfg(feature = "merkle_sum")]
 pub use sum::{
-    parse_sum_csv, parse_sum_proof_text, sum_proof_to_text, AbsenceError, AccountId, MerkleSumTree,
-    SumAbsenceNeighbor, SumAbsenceProof, SumBuildError, SumCsvError, SumInclusionProof, SumLeaf,
-    SumNode, SumOverflow, SumProofError, SumProofStep, SumProofTextError,
+    parse_sum_absent_text, parse_sum_csv, parse_sum_proof_text, sum_absent_to_text,
+    sum_proof_to_text, AbsenceError, AccountId, MerkleSumTree, SumAbsenceNeighbor, SumAbsenceProof,
+    SumBuildError, SumCsvError, SumInclusionProof, SumLeaf, SumNode, SumOverflow, SumProofError,
+    SumProofStep, SumProofTextError,
 };
 pub use tree::{LeafInfo, MerkleRoot, MerkleTree};

@@ -2,7 +2,9 @@
 #![cfg(all(feature = "merkle_sum", feature = "serde"))]
 
 use merkle_tree::proof::SiblingSide;
-use merkle_tree::sum::{MerkleSumTree, SumInclusionProof, SumLeaf, SumNode, SumProofStep};
+use merkle_tree::sum::{
+    MerkleSumTree, SumAbsenceProof, SumInclusionProof, SumLeaf, SumNode, SumProofStep,
+};
 
 fn roundtrip<T>(value: &T) -> T
 where
@@ -60,4 +62,15 @@ fn sum_proof_step_preserves_side_and_sibling_sum() {
     assert_eq!(back.side, SiblingSide::Left);
     assert_eq!(back.sibling.sum, 99);
     assert_eq!(back.sibling.hash, [7; 32]);
+}
+
+#[test]
+fn absence_proof_json_roundtrip_still_verifies() {
+    let leaves = [leaf(1, 40), leaf(3, 2), leaf(5, 8)];
+    let tree = MerkleSumTree::from_sorted_leaves(leaves).unwrap();
+    let root = tree.root_node().unwrap();
+    let proof = tree.prove_absent(&[2u8; 32]).unwrap();
+    let back: SumAbsenceProof = roundtrip(&proof);
+    assert_eq!(back, proof);
+    assert!(back.verify(&root).is_ok());
 }
