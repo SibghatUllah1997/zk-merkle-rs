@@ -736,6 +736,170 @@ impl SumInclusionProof {
     }
 }
 
+/// One neighbouring leaf used in a [`SumAbsenceProof`].
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SumAbsenceNeighbor {
+    /// The neighbouring account and amount.
+    pub leaf: SumLeaf,
+    /// Inclusion proof for [`Self::leaf`] against the published root.
+    pub proof: SumInclusionProof,
+}
+
+/// Proof that `query` is not among the leaves of a sorted unique sum tree.
+///
+/// The argument is two neighbouring inclusion proofs whose ids sandwich
+/// `query`. Consecutive indices mean no leaf sits between them, so the
+/// missing id cannot be in the tree. A query below the first leaf (or above
+/// the last) uses only the right (or left) neighbour.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SumAbsenceProof {
+    /// Account id claimed to be missing.
+    pub query: AccountId,
+    /// Neighbour immediately below `query`, if any.
+    pub left: Option<SumAbsenceNeighbor>,
+    /// Neighbour immediately above `query`, if any.
+    pub right: Option<SumAbsenceNeighbor>,
+}
+
+/// Why a [`SumAbsenceProof`] was rejected.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AbsenceError {
+    /// Neither neighbour was supplied.
+    EmptyNeighbors,
+    /// A neighbour inclusion proof did not verify.
+    Inclusion(SumProofError),
+    /// The two neighbours are not consecutive leaf indices.
+    NotAdjacent {
+        /// Left neighbour index.
+        left: usize,
+        /// Right neighbour index.
+        right: usize,
+    },
+    /// A right-only proof whose neighbour is not leaf 0.
+    NotFirst {
+        /// Claimed index of the first leaf.
+        index: usize,
+    },
+    /// A left-only proof whose neighbour is not the last leaf.
+    NotLast {
+        /// Claimed index of the last leaf.
+        index: usize,
+        /// Claimed leaf count.
+        leaf_count: usize,
+    },
+    /// Neighbours disagree on how many leaves the tree has.
+    LeafCountMismatch {
+        /// Leaf count on the left proof.
+        left: usize,
+        /// Leaf count on the right proof.
+        right: usize,
+    },
+    /// `query` is not strictly outside / between the neighbour account ids.
+    NotBounded,
+}
+
+impl core::fmt::Display for AbsenceError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            AbsenceError::EmptyNeighbors => write!(f, "absence proof has no neighbours"),
+            AbsenceError::Inclusion(err) => write!(f, "neighbour inclusion failed: {err}"),
+            AbsenceError::NotAdjacent { left, right } => {
+                write!(f, "neighbours at {left} and {right} are not adjacent")
+            }
+            AbsenceError::NotFirst { index } => {
+                write!(f, "right-only neighbour must be index 0, got {index}")
+            }
+            AbsenceError::NotLast { index, leaf_count } => write!(
+                f,
+                "left-only neighbour must be the last of {leaf_count} leaves, got {index}"
+            ),
+            AbsenceError::LeafCountMismatch { left, right } => {
+                write!(f, "neighbours disagree on leaf count ({left} vs {right})")
+            }
+            AbsenceError::NotBounded => {
+                write!(f, "query is not strictly bounded by the neighbour ids")
+            }
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for AbsenceError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            AbsenceError::Inclusion(err) => Some(err),
+            _ => None,
+        }
+    }
+}
+
+impl From<SumProofError> for AbsenceError {
+    fn from(err: SumProofError) -> Self {
+        AbsenceError::Inclusion(err)
+    }
+}
+
+impl SumAbsenceProof {
+    /// Check that `query` sits in a gap of the tree with root `root`.
+    ///
+    /// Neighbour inclusion is verified first, then the indices must be
+    /// consecutive (or the first / last leaf for an end gap) and the account
+    /// ids must strictly sandwich `query`. Non-adjacent neighbours would let
+    /// a skipped leaf hide in the gap.
+    pub fn verify(&self, root: &SumNode) -> Result<(), AbsenceError> {
+        match (&self.left, &self.right) {
+            (None, None) => Err(AbsenceError::EmptyNeighbors),
+            (Some(left), None) => {
+                left.proof.verify(&left.leaf, root)?;
+                if left.proof.leaf_index + 1 != left.proof.leaf_count {
+                    return Err(AbsenceError::NotLast {
+                        index: left.proof.leaf_index,
+                        leaf_count: left.proof.leaf_count,
+                    });
+                }
+                if left.leaf.account_id >= self.query {
+                    return Err(AbsenceError::NotBounded);
+                }
+                Ok(())
+            }
+            (None, Some(right)) => {
+                right.proof.verify(&right.leaf, root)?;
+                if right.proof.leaf_index != 0 {
+                    return Err(AbsenceError::NotFirst {
+                        index: right.proof.leaf_index,
+                    });
+                }
+                if self.query >= right.leaf.account_id {
+                    return Err(AbsenceError::NotBounded);
+                }
+                Ok(())
+            }
+            (Some(left), Some(right)) => {
+                left.proof.verify(&left.leaf, root)?;
+                right.proof.verify(&right.leaf, root)?;
+                if left.proof.leaf_count != right.proof.leaf_count {
+                    return Err(AbsenceError::LeafCountMismatch {
+                        left: left.proof.leaf_count,
+                        right: right.proof.leaf_count,
+                    });
+                }
+                if left.proof.leaf_index + 1 != right.proof.leaf_index {
+                    return Err(AbsenceError::NotAdjacent {
+                        left: left.proof.leaf_index,
+                        right: right.proof.leaf_index,
+                    });
+                }
+                if left.leaf.account_id >= self.query || self.query >= right.leaf.account_id {
+                    return Err(AbsenceError::NotBounded);
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
 impl MerkleSumTree {
     /// Inclusion proof for the leaf at `index`, or `None` if out of range.
     ///
@@ -781,6 +945,53 @@ impl MerkleSumTree {
             leaf_count: self.leaves.len(),
             steps,
         })
+    }
+
+    /// Non-inclusion proof for `account_id`, or `None` if it is present,
+    /// the tree is empty, or the ids are not strictly increasing.
+    ///
+    /// ```
+    /// use merkle_tree::sum::{MerkleSumTree, SumLeaf};
+    ///
+    /// let tree = MerkleSumTree::from_sorted_leaves([
+    ///     SumLeaf::new([1u8; 32], 40),
+    ///     SumLeaf::new([3u8; 32], 8),
+    /// ])
+    /// .expect("sorted");
+    /// let root = tree.root_node().expect("non-empty");
+    /// let proof = tree.prove_absent(&[2u8; 32]).expect("missing");
+    /// assert!(proof.verify(&root).is_ok());
+    /// assert!(tree.prove_absent(&[1u8; 32]).is_none());
+    /// ```
+    pub fn prove_absent(&self, account_id: &AccountId) -> Option<SumAbsenceProof> {
+        if self.leaves.is_empty() || !self.is_sorted_unique() {
+            return None;
+        }
+        match self
+            .leaves
+            .binary_search_by(|leaf| leaf.account_id.cmp(account_id))
+        {
+            Ok(_) => None,
+            Err(insert_at) => {
+                let left = insert_at.checked_sub(1).map(|index| SumAbsenceNeighbor {
+                    leaf: self.leaves[index],
+                    proof: self.prove(index).expect("in range"),
+                });
+                let right = if insert_at < self.leaves.len() {
+                    Some(SumAbsenceNeighbor {
+                        leaf: self.leaves[insert_at],
+                        proof: self.prove(insert_at).expect("in range"),
+                    })
+                } else {
+                    None
+                };
+                Some(SumAbsenceProof {
+                    query: *account_id,
+                    left,
+                    right,
+                })
+            }
+        }
     }
 }
 
@@ -1286,6 +1497,44 @@ mod tests {
     }
 
     #[test]
+    fn prove_absent_verifies_a_gap_between_neighbours() {
+        let tree = MerkleSumTree::from_sorted_leaves([leaf(1, 10), leaf(3, 20), leaf(5, 30)])
+            .expect("sorted");
+        let root = tree.root_node().unwrap();
+        let proof = tree.prove_absent(&[2u8; 32]).expect("missing");
+        assert_eq!(proof.query, [2u8; 32]);
+        assert_eq!(proof.left.as_ref().unwrap().leaf.account_id, [1u8; 32]);
+        assert_eq!(proof.right.as_ref().unwrap().leaf.account_id, [3u8; 32]);
+        assert_eq!(proof.verify(&root), Ok(()));
+        assert!(tree.prove_absent(&[3u8; 32]).is_none());
+    }
+
+    #[test]
+    fn prove_absent_covers_below_first_and_above_last() {
+        let tree = MerkleSumTree::from_sorted_leaves([leaf(2, 1), leaf(4, 1)]).expect("sorted");
+        let root = tree.root_node().unwrap();
+
+        let below = tree.prove_absent(&[1u8; 32]).expect("below");
+        assert!(below.left.is_none());
+        assert_eq!(below.right.as_ref().unwrap().proof.leaf_index, 0);
+        assert_eq!(below.verify(&root), Ok(()));
+
+        let above = tree.prove_absent(&[9u8; 32]).expect("above");
+        assert!(above.right.is_none());
+        assert_eq!(above.left.as_ref().unwrap().proof.leaf_index, 1);
+        assert_eq!(above.verify(&root), Ok(()));
+    }
+
+    #[test]
+    fn prove_absent_needs_a_non_empty_sorted_tree() {
+        let empty = MerkleSumTree::from_sorted_leaves([]).expect("empty");
+        assert!(empty.prove_absent(&[1u8; 32]).is_none());
+
+        let unsorted = MerkleSumTree::from_leaves([leaf(3, 1), leaf(1, 1)]).expect("fits");
+        assert!(unsorted.prove_absent(&[2u8; 32]).is_none());
+    }
+
+    #[test]
     fn shifting_value_between_leaves_changes_the_root_hash() {
         let a = MerkleSumTree::from_leaves([leaf(1, 30), leaf(2, 12)]).expect("fits");
         let b = MerkleSumTree::from_leaves([leaf(1, 31), leaf(2, 11)]).expect("fits");
@@ -1588,5 +1837,7 @@ mod tests {
         assert_serde::<SumNode>();
         assert_serde::<SumProofStep>();
         assert_serde::<SumInclusionProof>();
+        assert_serde::<SumAbsenceNeighbor>();
+        assert_serde::<SumAbsenceProof>();
     }
 }
