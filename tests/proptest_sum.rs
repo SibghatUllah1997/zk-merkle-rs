@@ -1,7 +1,9 @@
 //! Property tests for Merkle sum-tree totals and subtree sums.
 #![cfg(feature = "merkle_sum")]
 
-use merkle_tree::{MerkleSumTree, SumLeaf, SumNode, SumProofError};
+use std::collections::BTreeMap;
+
+use merkle_tree::{MerkleSumTree, SumBuildError, SumLeaf, SumNode, SumProofError};
 use proptest::prelude::*;
 use proptest::test_runner::FileFailurePersistence;
 
@@ -24,6 +26,28 @@ fn any_leaves() -> impl Strategy<Value = Vec<SumLeaf>> {
 
 fn nonempty_leaves() -> impl Strategy<Value = Vec<SumLeaf>> {
     prop::collection::vec(sum_leaf(), 1..=16)
+}
+
+/// Distinct account ids in increasing order. Amounts stay small so parent
+/// totals cannot overflow `u128`.
+fn distinct_sorted_leaves() -> impl Strategy<Value = Vec<SumLeaf>> {
+    prop::collection::btree_map(any::<u8>(), 0u128..=10_000, 1..=12).prop_map(|map| {
+        map.into_iter()
+            .map(|(id, amount)| SumLeaf::new([id; 32], amount))
+            .collect()
+    })
+}
+
+/// First repeated account id, matching [`MerkleSumTree::from_unique_leaves`].
+fn first_duplicate(leaves: &[SumLeaf]) -> Option<(usize, usize, [u8; 32])> {
+    let mut seen = BTreeMap::new();
+    for (index, leaf) in leaves.iter().enumerate() {
+        if let Some(&first) = seen.get(&leaf.account_id) {
+            return Some((first, index, leaf.account_id));
+        }
+        seen.insert(leaf.account_id, index);
+    }
+    None
 }
 
 /// Fold leaf amounts the same way the tree folds nodes: pair sums, promote an
@@ -147,5 +171,75 @@ proptest! {
             proof.verify(&leaves[i], &root),
             Err(SumProofError::HashMismatch)
         );
+    }
+
+    #[test]
+    fn unique_constructor_matches_from_leaves_or_names_the_first_duplicate(
+        leaves in nonempty_leaves(),
+    ) {
+        match MerkleSumTree::from_unique_leaves(leaves.clone()) {
+            Ok(tree) => {
+                prop_assert!(first_duplicate(&leaves).is_none());
+                let expected = MerkleSumTree::from_leaves(leaves).expect("small amounts fit");
+                prop_assert_eq!(tree, expected);
+            }
+            Err(SumBuildError::Duplicate {
+                account_id,
+                first,
+                second,
+            }) => {
+                let (want_first, want_second, want_id) =
+                    first_duplicate(&leaves).expect("a repeated id");
+                prop_assert_eq!(first, want_first);
+                prop_assert_eq!(second, want_second);
+                prop_assert_eq!(account_id, want_id);
+                prop_assert!(first < second);
+            }
+            Err(other) => prop_assert!(false, "unexpected error {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unique_constructor_rejects_an_inserted_copy(
+        leaves in distinct_sorted_leaves(),
+        src in any::<prop::sample::Index>(),
+        dst in any::<prop::sample::Index>(),
+    ) {
+        let src_i = src.index(leaves.len());
+        let dst_i = dst.index(leaves.len() + 1);
+        let mut with_dup = leaves.clone();
+        with_dup.insert(dst_i, leaves[src_i]);
+        let err = MerkleSumTree::from_unique_leaves(with_dup).expect_err("copied account id");
+        match err {
+            SumBuildError::Duplicate { account_id, .. } => {
+                prop_assert_eq!(account_id, leaves[src_i].account_id);
+            }
+            other => prop_assert!(false, "unexpected error {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sorted_constructor_accepts_strictly_increasing_ids(leaves in distinct_sorted_leaves()) {
+        let sorted = MerkleSumTree::from_sorted_leaves(leaves.clone()).expect("sorted");
+        let unique = MerkleSumTree::from_unique_leaves(leaves.clone()).expect("unique");
+        prop_assert_eq!(&sorted, &unique);
+        prop_assert!(sorted.is_sorted_unique());
+        for (i, leaf) in leaves.iter().enumerate() {
+            prop_assert_eq!(sorted.binary_search(&leaf.account_id), Some(i));
+            prop_assert_eq!(sorted.position(&leaf.account_id), Some(i));
+        }
+    }
+
+    #[test]
+    fn sorted_constructor_rejects_an_adjacent_swap(
+        leaves in distinct_sorted_leaves(),
+        which in any::<prop::sample::Index>(),
+    ) {
+        prop_assume!(leaves.len() >= 2);
+        let i = which.index(leaves.len() - 1);
+        let mut decreasing = leaves;
+        decreasing.swap(i, i + 1);
+        let err = MerkleSumTree::from_sorted_leaves(decreasing).expect_err("not increasing");
+        prop_assert_eq!(err, SumBuildError::Unsorted { index: i + 1 });
     }
 }
