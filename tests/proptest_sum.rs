@@ -242,4 +242,37 @@ proptest! {
         let err = MerkleSumTree::from_sorted_leaves(decreasing).expect_err("not increasing");
         prop_assert_eq!(err, SumBuildError::Unsorted { index: i + 1 });
     }
+
+    #[test]
+    fn a_present_id_cannot_be_proven_absent(leaves in distinct_sorted_leaves()) {
+        let tree = MerkleSumTree::from_sorted_leaves(leaves.clone()).expect("sorted");
+        for leaf in &leaves {
+            prop_assert!(tree.prove_absent(&leaf.account_id).is_none());
+        }
+    }
+
+    #[test]
+    fn a_missing_id_has_a_verifying_absence_proof(
+        leaves in distinct_sorted_leaves(),
+        query in any::<[u8; 32]>(),
+    ) {
+        let tree = MerkleSumTree::from_sorted_leaves(leaves.clone()).expect("sorted");
+        let root = tree.root_node().expect("non-empty");
+        if leaves.iter().any(|leaf| leaf.account_id == query) {
+            prop_assert!(tree.prove_absent(&query).is_none());
+        } else {
+            let proof = tree.prove_absent(&query).expect("missing");
+            prop_assert_eq!(proof.query, query);
+            prop_assert_eq!(proof.verify(&root), Ok(()));
+            if let Some(left) = &proof.left {
+                prop_assert!(left.leaf.account_id < query);
+                prop_assert_eq!(left.proof.verify(&left.leaf, &root), Ok(()));
+            }
+            if let Some(right) = &proof.right {
+                prop_assert!(query < right.leaf.account_id);
+                prop_assert_eq!(right.proof.verify(&right.leaf, &root), Ok(()));
+            }
+            prop_assert!(proof.left.is_some() || proof.right.is_some());
+        }
+    }
 }
