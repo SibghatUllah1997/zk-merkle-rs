@@ -125,9 +125,9 @@ order.
 
 ## Browser verifier
 
-The `wasm` feature exports `verifyInclusionProof` and `verifySumProof` for
-a static page. Build a `cdylib` as in [Verifying in the browser](wasm.md),
-then serve `demo/`:
+The `wasm` feature exports `verifyInclusionProof`, `verifySumProof`, and
+`verifySumAbsent` for a static page. Build a `cdylib` as in
+[Verifying in the browser](wasm.md), then serve `demo/`:
 
 ```bash
 rustup target add wasm32-unknown-unknown

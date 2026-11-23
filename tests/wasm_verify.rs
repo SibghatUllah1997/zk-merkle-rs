@@ -1,8 +1,8 @@
 //! The browser verifier must accept exactly what the CLI accepts.
 
 use merkle_tree::hashing::to_hex32;
-use merkle_tree::sum::{sum_proof_to_text, MerkleSumTree, SumLeaf};
-use merkle_tree::wasm::{verify_inclusion_proof, verify_sum_proof};
+use merkle_tree::sum::{sum_absent_to_text, sum_proof_to_text, MerkleSumTree, SumLeaf};
+use merkle_tree::wasm::{verify_inclusion_proof, verify_sum_absent, verify_sum_proof};
 use merkle_tree::MerkleTree;
 use std::process::Command;
 
@@ -78,6 +78,74 @@ fn cli_sum_prove_output_verifies_in_the_browser_verifier() {
     let verdict = verify_sum_proof(&text, &to_hex32(&root.hash), &root.sum.to_string());
     assert!(verdict.ok(), "{}", verdict.reason());
     assert_eq!(verdict.account(), to_hex32(&[2u8; 32]));
+}
+
+#[test]
+fn every_gap_verifies_for_odd_and_even_sorted_trees() {
+    for n in [1u8, 2, 5, 8, 13] {
+        let leaves = leaves(n);
+        let tree = MerkleSumTree::from_sorted_leaves(leaves.clone()).expect("sorted");
+        let root = tree.root_node().expect("non-empty");
+        let root_hex = to_hex32(&root.hash);
+        let total = root.sum.to_string();
+        for id in 0u8..=n + 1 {
+            let query = [id; 32];
+            if leaves.iter().any(|leaf| leaf.account_id == query) {
+                continue;
+            }
+            let text = sum_absent_to_text(&tree.prove_absent(&query).expect("missing"));
+            let verdict = verify_sum_absent(&text, &root_hex, &total);
+            assert!(verdict.ok(), "n={n} id={id}: {}", verdict.reason());
+            assert_eq!(verdict.account(), to_hex32(&query));
+        }
+    }
+}
+
+#[test]
+fn tampered_absent_query_or_foreign_root_is_rejected() {
+    let leaves = leaves(5);
+    let tree = MerkleSumTree::from_sorted_leaves(leaves.clone()).expect("sorted");
+    let root = tree.root_node().expect("non-empty");
+    let text = sum_absent_to_text(&tree.prove_absent(&[6u8; 32]).expect("missing"));
+    let root_hex = to_hex32(&root.hash);
+    let total = root.sum.to_string();
+
+    let rewritten = text.replacen(&to_hex32(&[6u8; 32]), &to_hex32(&[5u8; 32]), 1);
+    assert_ne!(rewritten, text);
+    assert!(!verify_sum_absent(&rewritten, &root_hex, &total).ok());
+
+    let other = MerkleSumTree::from_sorted_leaves(leaves[..4].to_vec()).expect("sorted");
+    let other_hex = to_hex32(&other.root_node().expect("non-empty").hash);
+    assert!(!verify_sum_absent(&text, &other_hex, &total).ok());
+}
+
+#[test]
+fn cli_sum_absent_output_verifies_in_the_browser_verifier() {
+    let path = std::env::temp_dir().join("zk-merkle-wasm-absent.csv");
+    let mut csv = String::from("account_id,amount\n");
+    for leaf in leaves(3) {
+        csv.push_str(&format!("{},{}\n", to_hex32(&leaf.account_id), leaf.amount));
+    }
+    std::fs::write(&path, csv).expect("write csv");
+
+    let missing = to_hex32(&[4u8; 32]);
+    let out = Command::new(env!("CARGO_BIN_EXE_merkle"))
+        .args(["sum-absent", path.to_str().unwrap(), "--account", &missing])
+        .output()
+        .expect("run merkle");
+    let _ = std::fs::remove_file(&path);
+    assert!(
+        out.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = String::from_utf8(out.stdout).expect("utf-8");
+
+    let tree = MerkleSumTree::from_sorted_leaves(leaves(3)).expect("sorted");
+    let root = tree.root_node().expect("non-empty");
+    let verdict = verify_sum_absent(&text, &to_hex32(&root.hash), &root.sum.to_string());
+    assert!(verdict.ok(), "{}", verdict.reason());
+    assert_eq!(verdict.account(), missing);
 }
 
 #[test]

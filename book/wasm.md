@@ -1,7 +1,7 @@
 # Verifying in the browser
 
 Most users will never install a CLI to check a proof of reserves. The `wasm`
-feature exposes two `wasm-bindgen` functions so a static page can do the
+feature exposes `wasm-bindgen` functions so a static page can do the
 check client side, with nothing sent back to the exchange.
 
 ```js
@@ -12,18 +12,27 @@ if (v.ok) {
   show(`proof rejected: ${v.reason}`);
 }
 v.free();
+
+const missing = verifySumAbsent(absentText, publishedRootHex, publishedTotal);
+if (missing.ok) {
+  show(`account ${missing.account} is not in this tree`);
+}
+missing.free();
 ```
 
 - `verifySumProof(proofText, rootHex, totalSum)` takes the text printed by
   `merkle sum-prove`, plus the root hash and total the exchange published.
+- `verifySumAbsent(proofText, rootHex, totalSum)` takes the text printed by
+  `merkle sum-absent` and checks that the query sits in a gap of that tree.
 - `verifyInclusionProof(leaf, steps, rootHex)` checks a plain-tree proof in
   the CLI's `R:<hex>,L:<hex>` path format.
 - `verifyRangeProof(amount, proofHex)` (needs `zk-range`) checks a Halo 2
   transcript that a public amount fits in 64 bits.
 
-Both return a `Verdict` with `ok`, `reason`, `account`, and `amount`. They
+They return a `Verdict` with `ok`, `reason`, `account`, and `amount`. They
 never throw: bad hex, a malformed file, and a mismatched proof all come back
-as `ok = false` with a short reason.
+as `ok = false` with a short reason. An absence check fills `account` with
+the missing id and leaves `amount` empty.
 
 ## Building
 

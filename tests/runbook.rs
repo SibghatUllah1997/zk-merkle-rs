@@ -20,6 +20,7 @@ fn runbook_names_the_cli_commands() {
         "solvency",
         "verifyInclusionProof",
         "verifySumProof",
+        "verifySumAbsent",
     ] {
         assert!(book.contains(needle), "runbook missing {needle:?}");
     }

@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-23
+
+- Property tests cover unique and sorted sum-tree constructors, honest absence proofs, and tampered neighbours
+- `verifySumAbsent` checks a missing-account proof in the browser against the published root and total
+- The demo page accepts `merkle sum-absent` text the same way it already accepts inclusion proofs
+
 ## 2026-11-21
 
 - Unique and sorted sum-tree constructors refuse a repeated or decreasing account id

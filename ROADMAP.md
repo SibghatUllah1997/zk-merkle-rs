@@ -61,4 +61,4 @@ ids so two neighbouring leaves can bound a missing id.
 43. [x] Reject duplicate account ids when building with `from_unique_leaves`
 44. [x] Add `from_sorted_leaves`, binary search, and a non-inclusion proof for a missing account
 45. [x] Add property tests that unique/sorted constructors and absence proofs hold, and that tampered neighbours fail
-46. [ ] Add a `wasm-bindgen` verifier for non-inclusion proofs
+46. [x] Add a `wasm-bindgen` verifier for non-inclusion proofs

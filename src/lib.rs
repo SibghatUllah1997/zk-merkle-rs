@@ -61,7 +61,7 @@
 //! - `solvency` (feature `merkle_sum`) — compare a published root and total with an independent liabilities snapshot
 //! - `range` (feature `zk-range`) — 64-bit Halo 2 range-check circuit (`0 <= amount < 2^64`)
 //! - `wasm` (feature `wasm`) — wasm-bindgen verifier for plain and sum-tree inclusion proofs
-//!   (optional `verifyRangeProof` when `zk-range` is also enabled)
+//!   and non-inclusion proofs (optional `verifyRangeProof` when `zk-range` is also enabled)
 
 #![cfg_attr(not(feature = "std"), no_std)]
 

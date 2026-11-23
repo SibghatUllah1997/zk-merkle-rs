@@ -1,7 +1,8 @@
 # Verifier demo
 
-A small static page that calls `verifyInclusionProof` and `verifySumProof`
-from the `wasm` feature. It does not reimplement hashing in JavaScript.
+A small static page that calls `verifyInclusionProof`, `verifySumProof`,
+and `verifySumAbsent` from the `wasm` feature. It does not reimplement
+hashing in JavaScript.
 
 ## Build the wasm module
 

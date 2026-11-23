@@ -65,6 +65,23 @@
     <p id="sum-out"></p>
   </form>
 
+  <h2>Merkle-sum non-inclusion</h2>
+  <p class="hint">
+    Paste the <code>key=value</code> file from <code>merkle sum-absent</code>.
+    The published root and total must come from the exchange, not from that
+    file. A pass means that account id is not among the leaves.
+  </p>
+  <form id="absent">
+    <label for="absent-text">Proof text</label>
+    <textarea id="absent-text" name="absent-text" spellcheck="false"></textarea>
+    <label for="absent-root">Published root (hex)</label>
+    <input id="absent-root" name="absent-root" autocomplete="off" spellcheck="false">
+    <label for="absent-total">Published total</label>
+    <input id="absent-total" name="absent-total" inputmode="numeric" autocomplete="off" spellcheck="false">
+    <button type="submit">Verify absence</button>
+    <p id="absent-out"></p>
+  </form>
+
   <h2>64-bit range proof</h2>
   <p class="hint">
     Optional. Rebuild with <code>--features wasm,zk-range</code> to enable.
@@ -126,6 +143,22 @@
       );
       const msg = v.ok
         ? ("account " + v.account + " with " + v.amount + " is under this root")
+        : explain(v);
+      show(out, v.ok, msg);
+      v.free();
+    });
+
+    document.getElementById("absent").addEventListener("submit", (event) => {
+      event.preventDefault();
+      const out = document.getElementById("absent-out");
+      if (!wasm) { show(out, false, "wasm not loaded"); return; }
+      const v = wasm.verifySumAbsent(
+        document.getElementById("absent-text").value,
+        document.getElementById("absent-root").value,
+        document.getElementById("absent-total").value,
+      );
+      const msg = v.ok
+        ? ("account " + v.account + " is not under this root")
         : explain(v);
       show(out, v.ok, msg);
       v.free();

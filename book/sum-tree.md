@@ -157,7 +157,8 @@ assert!(tree.prove_absent(&[1u8; 32]).is_none());
 `merkle sum-absent <file> --account <hex>` prints that proof as
 `key=value` lines (`kind=absent`, the query, then `left.*` / `right.*`
 neighbour fields). `sum-verify-absent` checks it against the published
-root and total. The CSV must already be strictly sorted.
+root and total. The CSV must already be strictly sorted. The `wasm`
+feature exposes the same check as `verifySumAbsent`.
 
 An absence proof only shows that one id is missing from *this* tree. It
 does not show that every real customer was listed; see

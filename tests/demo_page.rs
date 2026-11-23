@@ -8,7 +8,12 @@ fn read(rel: &str) -> String {
 #[test]
 fn demo_page_calls_the_wasm_export_names() {
     let html = read("demo/index.html");
-    for name in ["verifyInclusionProof", "verifySumProof", "verifyRangeProof"] {
+    for name in [
+        "verifyInclusionProof",
+        "verifySumProof",
+        "verifySumAbsent",
+        "verifyRangeProof",
+    ] {
         assert!(html.contains(name), "demo page missing {name}");
     }
     assert!(html.contains("./pkg/merkle_tree.js"));
