@@ -35,7 +35,7 @@ use wasm_bindgen::prelude::wasm_bindgen;
 use crate::hashing::from_hex;
 use crate::hashing::{to_hex32, try_from_hex32};
 use crate::proof::{parse_proof_steps, verify_inclusion};
-use crate::sum::{parse_sum_proof_text, SumNode};
+use crate::sum::{parse_sum_absent_text, parse_sum_proof_text, SumNode};
 
 /// Result of a browser-side verification.
 ///
@@ -126,6 +126,55 @@ pub fn verify_sum_proof(proof_text: &str, root_hex: &str, total_sum: &str) -> Ve
     verdict
 }
 
+/// Verify a non-inclusion proof written by `merkle sum-absent`.
+///
+/// `root_hex` and `total_sum` are the values the exchange published. The
+/// proof text never carries them. `account` is the missing id; `amount` stays
+/// empty because an absence proof has no single balance.
+///
+/// ```
+/// use merkle_tree::sum::{sum_absent_to_text, MerkleSumTree, SumLeaf};
+/// use merkle_tree::wasm::verify_sum_absent;
+///
+/// let tree = MerkleSumTree::from_sorted_leaves([
+///     SumLeaf::new([1u8; 32], 40),
+///     SumLeaf::new([3u8; 32], 8),
+/// ])
+/// .expect("sorted");
+/// let root = tree.root_node().expect("non-empty");
+/// let text = sum_absent_to_text(&tree.prove_absent(&[2u8; 32]).expect("missing"));
+///
+/// let verdict = verify_sum_absent(&text, &merkle_tree::to_hex32(&root.hash), "48");
+/// assert!(verdict.ok());
+/// assert_eq!(verdict.account(), merkle_tree::to_hex32(&[2u8; 32]));
+///
+/// let wrong_total = verify_sum_absent(&text, &merkle_tree::to_hex32(&root.hash), "47");
+/// assert!(!wrong_total.ok());
+/// ```
+#[wasm_bindgen(js_name = verifySumAbsent)]
+pub fn verify_sum_absent(proof_text: &str, root_hex: &str, total_sum: &str) -> Verdict {
+    let hash = match try_from_hex32(root_hex.trim()) {
+        Ok(hash) => hash,
+        Err(err) => return Verdict::fail(format!("root: {err}")),
+    };
+    let total = total_sum.trim();
+    let sum = match total.parse::<u128>() {
+        Ok(sum) => sum,
+        Err(_) => return Verdict::fail(format!("total: invalid sum {total:?}")),
+    };
+    let proof = match parse_sum_absent_text(proof_text) {
+        Ok(parsed) => parsed,
+        Err(err) => return Verdict::fail(format!("proof: {err}")),
+    };
+
+    let mut verdict = match proof.verify(&SumNode::new(hash, sum)) {
+        Ok(()) => Verdict::pass(),
+        Err(err) => Verdict::fail(err.to_string()),
+    };
+    verdict.account = to_hex32(&proof.query);
+    verdict
+}
+
 /// Verify a plain-tree inclusion proof for `leaf` (UTF-8 bytes, as in the CLI).
 ///
 /// `steps` uses the CLI path format, `R:<hex>,L:<hex>`; an empty string is the
@@ -177,7 +226,7 @@ pub fn verify_range_proof_js(amount: &str, proof_hex: &str) -> Verdict {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sum::{sum_proof_to_text, MerkleSumTree, SumLeaf};
+    use crate::sum::{sum_absent_to_text, sum_proof_to_text, MerkleSumTree, SumLeaf};
     use crate::MerkleTree;
 
     fn sum_fixture() -> (String, String) {
@@ -231,6 +280,91 @@ mod tests {
             assert!(verdict.account().is_empty());
             assert!(verdict.amount().is_empty());
         }
+    }
+
+    fn absent_fixture() -> (String, String, String) {
+        let leaves = [
+            SumLeaf::new([1u8; 32], 40),
+            SumLeaf::new([3u8; 32], 8),
+            SumLeaf::new([5u8; 32], 2),
+        ];
+        let tree = MerkleSumTree::from_sorted_leaves(leaves).expect("sorted");
+        let root = tree.root_node().expect("non-empty");
+        let text = sum_absent_to_text(&tree.prove_absent(&[2u8; 32]).expect("missing"));
+        (text, to_hex32(&root.hash), root.sum.to_string())
+    }
+
+    #[test]
+    fn sum_absent_passes_and_names_the_query() {
+        let (text, root, total) = absent_fixture();
+        let verdict = verify_sum_absent(&text, &root, &total);
+        assert!(verdict.ok(), "{}", verdict.reason());
+        assert!(verdict.reason().is_empty());
+        assert_eq!(verdict.account(), to_hex32(&[2u8; 32]));
+        assert!(verdict.amount().is_empty());
+    }
+
+    #[test]
+    fn sum_absent_tolerates_pasted_whitespace() {
+        let (text, root, total) = absent_fixture();
+        let verdict = verify_sum_absent(&text, &format!("  {root}\n"), &format!(" {total} "));
+        assert!(verdict.ok(), "{}", verdict.reason());
+    }
+
+    #[test]
+    fn sum_absent_wrong_total_fails_but_still_names_the_query() {
+        let (text, root, _total) = absent_fixture();
+        let verdict = verify_sum_absent(&text, &root, "49");
+        assert!(!verdict.ok());
+        assert!(verdict.reason().contains("49"), "{}", verdict.reason());
+        assert_eq!(verdict.account(), to_hex32(&[2u8; 32]));
+        assert!(verdict.amount().is_empty());
+    }
+
+    #[test]
+    fn sum_absent_bad_inputs_fail_without_account() {
+        let (text, root, total) = absent_fixture();
+        for verdict in [
+            verify_sum_absent(&text, "zz", &total),
+            verify_sum_absent(&text, &root, "-1"),
+            verify_sum_absent("account=aa\n", &root, &total),
+        ] {
+            assert!(!verdict.ok());
+            assert!(!verdict.reason().is_empty());
+            assert!(verdict.account().is_empty());
+            assert!(verdict.amount().is_empty());
+        }
+    }
+
+    #[test]
+    fn sum_absent_rejects_a_query_rewritten_onto_a_neighbour() {
+        let (text, root, total) = absent_fixture();
+        let neighbour = to_hex32(&[1u8; 32]);
+        let tampered = text.replacen(&to_hex32(&[2u8; 32]), &neighbour, 1);
+        assert_ne!(tampered, text);
+        let verdict = verify_sum_absent(&tampered, &root, &total);
+        assert!(!verdict.ok());
+        assert!(verdict.reason().contains("bounded"), "{}", verdict.reason());
+        assert_eq!(verdict.account(), neighbour);
+    }
+
+    #[test]
+    fn sum_absent_covers_below_first_and_above_last() {
+        let leaves = [SumLeaf::new([2u8; 32], 1), SumLeaf::new([4u8; 32], 1)];
+        let tree = MerkleSumTree::from_sorted_leaves(leaves).expect("sorted");
+        let root = tree.root_node().expect("non-empty");
+        let root_hex = to_hex32(&root.hash);
+        let total = root.sum.to_string();
+
+        let below = sum_absent_to_text(&tree.prove_absent(&[1u8; 32]).expect("below"));
+        let v = verify_sum_absent(&below, &root_hex, &total);
+        assert!(v.ok(), "{}", v.reason());
+        assert_eq!(v.account(), to_hex32(&[1u8; 32]));
+
+        let above = sum_absent_to_text(&tree.prove_absent(&[9u8; 32]).expect("above"));
+        let v = verify_sum_absent(&above, &root_hex, &total);
+        assert!(v.ok(), "{}", v.reason());
+        assert_eq!(v.account(), to_hex32(&[9u8; 32]));
     }
 
     #[test]
