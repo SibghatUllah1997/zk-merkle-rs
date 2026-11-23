@@ -3,7 +3,9 @@
 
 use std::collections::BTreeMap;
 
-use merkle_tree::{MerkleSumTree, SumBuildError, SumLeaf, SumNode, SumProofError};
+use merkle_tree::{
+    AbsenceError, MerkleSumTree, SumAbsenceNeighbor, SumBuildError, SumLeaf, SumNode, SumProofError,
+};
 use proptest::prelude::*;
 use proptest::test_runner::FileFailurePersistence;
 
@@ -36,6 +38,19 @@ fn distinct_sorted_leaves() -> impl Strategy<Value = Vec<SumLeaf>> {
             .map(|(id, amount)| SumLeaf::new([id; 32], amount))
             .collect()
     })
+}
+
+/// The 32-byte id immediately after `id`, or `None` if it is all `0xff`.
+fn successor_id(id: &[u8; 32]) -> Option<[u8; 32]> {
+    let mut next = *id;
+    for byte in next.iter_mut().rev() {
+        if *byte < 0xff {
+            *byte += 1;
+            return Some(next);
+        }
+        *byte = 0;
+    }
+    None
 }
 
 /// First repeated account id, matching [`MerkleSumTree::from_unique_leaves`].
@@ -274,5 +289,62 @@ proptest! {
             }
             prop_assert!(proof.left.is_some() || proof.right.is_some());
         }
+    }
+
+    #[test]
+    fn a_query_moved_onto_a_neighbour_is_not_bounded(
+        leaves in distinct_sorted_leaves(),
+        query in any::<[u8; 32]>(),
+    ) {
+        let tree = MerkleSumTree::from_sorted_leaves(leaves.clone()).expect("sorted");
+        let root = tree.root_node().expect("non-empty");
+        prop_assume!(leaves.iter().all(|leaf| leaf.account_id != query));
+        let mut proof = tree.prove_absent(&query).expect("missing");
+        proof.query = proof
+            .left
+            .as_ref()
+            .or(proof.right.as_ref())
+            .expect("a neighbour")
+            .leaf
+            .account_id;
+        prop_assert_eq!(proof.verify(&root), Err(AbsenceError::NotBounded));
+    }
+
+    #[test]
+    fn a_changed_neighbour_amount_fails_inclusion(
+        leaves in distinct_sorted_leaves(),
+        query in any::<[u8; 32]>(),
+    ) {
+        let tree = MerkleSumTree::from_sorted_leaves(leaves.clone()).expect("sorted");
+        let root = tree.root_node().expect("non-empty");
+        prop_assume!(leaves.iter().all(|leaf| leaf.account_id != query));
+        let mut proof = tree.prove_absent(&query).expect("missing");
+        if let Some(left) = proof.left.as_mut() {
+            left.leaf.amount ^= 1;
+        } else if let Some(right) = proof.right.as_mut() {
+            right.leaf.amount ^= 1;
+        }
+        prop_assert_eq!(
+            proof.verify(&root),
+            Err(AbsenceError::Inclusion(SumProofError::HashMismatch))
+        );
+    }
+
+    #[test]
+    fn skipped_neighbours_are_not_adjacent(leaves in distinct_sorted_leaves()) {
+        prop_assume!(leaves.len() >= 3);
+        let tree = MerkleSumTree::from_sorted_leaves(leaves.clone()).expect("sorted");
+        let root = tree.root_node().expect("non-empty");
+        let query = successor_id(&leaves[0].account_id).expect("room after first");
+        prop_assume!(query < leaves[1].account_id);
+        let mut proof = tree.prove_absent(&query).expect("gap after first");
+        proof.right = Some(SumAbsenceNeighbor {
+            leaf: leaves[2],
+            proof: tree.prove(2).expect("in range"),
+        });
+        prop_assert_eq!(
+            proof.verify(&root),
+            Err(AbsenceError::NotAdjacent { left: 0, right: 2 })
+        );
     }
 }
