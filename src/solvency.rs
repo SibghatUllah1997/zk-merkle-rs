@@ -12,6 +12,9 @@
 //!   between accounts, accounts were swapped, or the leaf order differs.
 //! - **Duplicate account ids.** The same id twice double-counts (or hides)
 //!   a balance, so it is reported even when everything else matches.
+//! - **Sorted unique ids.** Absence proofs need strictly increasing account
+//!   ids. A matching root that is not sorted is still flagged, because a
+//!   missing account cannot be bounded by neighbouring leaves.
 //! - **Reserves (optional).** Reserves cover liabilities when they are at
 //!   least the *snapshot* total; the auditor trusts their own figure, not the
 //!   published one.
@@ -104,6 +107,8 @@ pub struct SolvencyReport {
     computed: SumNode,
     accounts: usize,
     duplicates: Vec<AccountId>,
+    /// True when snapshot account ids are strictly increasing.
+    sorted: bool,
     reserves: Option<u128>,
 }
 
@@ -128,6 +133,15 @@ impl SolvencyReport {
         &self.duplicates
     }
 
+    /// Whether snapshot account ids are strictly increasing.
+    ///
+    /// Empty and single-leaf snapshots count as sorted. A decreasing or
+    /// equal neighbouring pair means [`MerkleSumTree::prove_absent`] cannot
+    /// bound a missing id.
+    pub fn is_sorted_unique(&self) -> bool {
+        self.sorted
+    }
+
     /// Published total compared with the snapshot total.
     pub fn total_status(&self) -> TotalStatus {
         TotalStatus::compare(self.published.sum, self.computed.sum)
@@ -138,11 +152,13 @@ impl SolvencyReport {
         self.published.hash == self.computed.hash
     }
 
-    /// Same root, same total, and no duplicate account ids.
+    /// Same root, same total, no duplicate account ids, and strictly
+    /// increasing ids so a missing account can be proven absent.
     pub fn is_consistent(&self) -> bool {
         self.root_matches()
             && self.total_status() == TotalStatus::Match
             && self.duplicates.is_empty()
+            && self.sorted
     }
 
     /// Attach the reserves figure to check coverage against.
@@ -178,8 +194,16 @@ pub fn compare_liabilities(
         computed,
         accounts: snapshot.len(),
         duplicates: duplicate_ids(snapshot),
+        sorted: ids_are_strictly_increasing(snapshot),
         reserves: None,
     })
+}
+
+/// True when each account id is strictly greater than the one before it.
+fn ids_are_strictly_increasing(snapshot: &[SumLeaf]) -> bool {
+    snapshot
+        .windows(2)
+        .all(|pair| pair[0].account_id < pair[1].account_id)
 }
 
 fn duplicate_ids(snapshot: &[SumLeaf]) -> Vec<AccountId> {
@@ -217,6 +241,7 @@ mod tests {
         let snap = leaves();
         let report = compare_liabilities(&root_of(&snap), &snap).unwrap();
         assert!(report.is_consistent());
+        assert!(report.is_sorted_unique());
         assert_eq!(report.accounts(), 3);
         assert_eq!(report.computed().sum, 50);
         assert_eq!(report.reserve_shortfall(), None);
@@ -266,6 +291,22 @@ mod tests {
         let report = compare_liabilities(&root_of(&snap), &snap).unwrap();
         assert_eq!(report.duplicates(), &[[2; 32], [9; 32]]);
         assert!(report.root_matches());
+        assert!(!report.is_sorted_unique());
+        assert!(!report.is_consistent());
+    }
+
+    #[test]
+    fn unsorted_unique_ids_match_the_root_but_are_inconsistent() {
+        let snap = [
+            SumLeaf::new([3; 32], 8),
+            SumLeaf::new([1; 32], 40),
+            SumLeaf::new([2; 32], 2),
+        ];
+        let report = compare_liabilities(&root_of(&snap), &snap).unwrap();
+        assert!(report.root_matches());
+        assert_eq!(report.total_status(), TotalStatus::Match);
+        assert!(report.duplicates().is_empty());
+        assert!(!report.is_sorted_unique());
         assert!(!report.is_consistent());
     }
 
