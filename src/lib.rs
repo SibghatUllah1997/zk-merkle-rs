@@ -58,7 +58,7 @@
 //! - [`log`] — append-only log with successive Merkle-root checkpoints
 //! - [`features`] — which optional crate features this build compiled with
 //! - `sum` (feature `merkle_sum`) — Merkle sum tree, inclusion proofs, sorted unique leaves, non-inclusion proofs, CSV leaves, layer totals, and serde-ready roots
-//! - `solvency` (feature `merkle_sum`) — compare a published root and total with an independent liabilities snapshot
+//! - `solvency` (feature `merkle_sum`) — compare a published root and total with an independent liabilities snapshot, including whether account ids are strictly sorted
 //! - `range` (feature `zk-range`) — 64-bit Halo 2 range-check circuit (`0 <= amount < 2^64`)
 //! - `wasm` (feature `wasm`) — wasm-bindgen verifier for plain and sum-tree inclusion proofs
 //!   and non-inclusion proofs (optional `verifyRangeProof` when `zk-range` is also enabled)

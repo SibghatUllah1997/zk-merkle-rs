@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-24
+
+- A three-leaf sorted tree now pins the absence-proof text for a missing id, including the gaps below the first leaf and above the last
+- Those frozen proofs still have to verify against the published root and a total of 50
+- `merkle solvency` prints `sorted=yes` or `sorted=no`; an unsorted snapshot is inconsistent because a missing account cannot be bounded
+
 ## 2026-11-23
 
 - Property tests cover unique and sorted sum-tree constructors, honest absence proofs, and tampered neighbours

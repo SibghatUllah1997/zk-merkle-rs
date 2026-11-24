@@ -230,6 +230,9 @@ tree and reports:
   with a different hash mean balances moved between accounts or the order
   differs
 - duplicate account ids, which would count one balance twice
+- whether account ids are strictly increasing (`sorted=yes`). An unsorted
+  snapshot matches its own root but cannot support absence proofs, so the
+  report is inconsistent
 - with `--reserves`, the shortfall of reserves against the *snapshot* total,
   not the published one
 

@@ -118,7 +118,9 @@ cargo run --features merkle_sum --bin merkle -- solvency liabilities.csv --root 
 
 Rebuilds the tree from *your* CSV and compares it with the published pair.
 `--reserves` is optional and is checked against the snapshot total, not the
-published one. Any mismatch prints a report on stderr and exits 1.
+published one. The report also prints `sorted=yes` when account ids strictly
+increase. An unsorted snapshot exits 1 even if the root and total match,
+because a missing id cannot be bounded by neighbouring leaves.
 
 The root depends on leaf order, so the snapshot must use the publisher's
 order.

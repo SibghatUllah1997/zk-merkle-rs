@@ -62,3 +62,5 @@ ids so two neighbouring leaves can bound a missing id.
 44. [x] Add `from_sorted_leaves`, binary search, and a non-inclusion proof for a missing account
 45. [x] Add property tests that unique/sorted constructors and absence proofs hold, and that tampered neighbours fail
 46. [x] Add a `wasm-bindgen` verifier for non-inclusion proofs
+47. [x] Pin frozen vectors for absence-proof text and the published root they verify against
+48. [x] Report unsorted snapshots in the solvency check so absence proofs remain meaningful
