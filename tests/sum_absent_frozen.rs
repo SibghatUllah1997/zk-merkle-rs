@@ -1,8 +1,10 @@
-//! Frozen absence-proof vector for a three-leaf sorted sum tree.
+//! Frozen absence-proof vectors for a three-leaf sorted sum tree.
 //!
 //! Leaves are account ids `[1; 32]`, `[3; 32]`, `[5; 32]` with amounts 40, 8,
-//! and 2 (total 50). A change to the `0x30`/`0x31` domain tags, parent
-//! hashing, or the `kind=absent` text format will miss this vector.
+//! and 2 (total 50). The mid-gap query is `[2; 32]`; `[0; 32]` sits below the
+//! first leaf and `[9; 32]` sits above the last. A change to the `0x30`/`0x31`
+//! domain tags, parent hashing, or the `kind=absent` text format will miss
+//! these vectors.
 #![cfg(feature = "merkle_sum")]
 
 use merkle_tree::sum::{
@@ -31,6 +33,29 @@ right.index=1
 right.leaf_count=3
 right.step=L:87c3d6a24580717f2bde2fb354fdd56ed2260df2cf088f5ecc0f2b50d47c440d:40
 right.step=R:46cb71a6934b7ceccd918c3852c1ad67e71df3c183faca377a64c651065c39f3:2
+";
+
+/// Absence proof for query `[0; 32]`, below the first leaf (right neighbour only).
+const FROZEN_BELOW_TEXT: &str = "\
+kind=absent
+account=0000000000000000000000000000000000000000000000000000000000000000
+right.account=0101010101010101010101010101010101010101010101010101010101010101
+right.amount=40
+right.index=0
+right.leaf_count=3
+right.step=R:779e4b15b78015d9b26cd927dfbed5aa80c038d5a0e055c04d85b291f43ac158:8
+right.step=R:46cb71a6934b7ceccd918c3852c1ad67e71df3c183faca377a64c651065c39f3:2
+";
+
+/// Absence proof for query `[9; 32]`, above the last leaf (left neighbour only).
+const FROZEN_ABOVE_TEXT: &str = "\
+kind=absent
+account=0909090909090909090909090909090909090909090909090909090909090909
+left.account=0505050505050505050505050505050505050505050505050505050505050505
+left.amount=2
+left.index=2
+left.leaf_count=3
+left.step=L:41c242aface80520b75055a26f3f44ef6adf356453b31ede57660f24eed24aef:48
 ";
 
 fn frozen_tree() -> MerkleSumTree {
@@ -83,4 +108,37 @@ fn present_ids_are_not_in_the_frozen_file() {
     assert!(tree.prove_absent(&[1u8; 32]).is_none());
     assert!(tree.prove_absent(&[3u8; 32]).is_none());
     assert!(tree.prove_absent(&[5u8; 32]).is_none());
+}
+
+#[test]
+fn prover_still_emits_the_end_gap_text() {
+    let tree = frozen_tree();
+    let below = tree.prove_absent(&[0u8; 32]).expect("below first");
+    let above = tree.prove_absent(&[9u8; 32]).expect("above last");
+    assert_eq!(sum_absent_to_text(&below), FROZEN_BELOW_TEXT);
+    assert_eq!(sum_absent_to_text(&above), FROZEN_ABOVE_TEXT);
+}
+
+#[test]
+fn frozen_end_gaps_still_verify() {
+    let root = frozen_root();
+    let below = parse_sum_absent_text(FROZEN_BELOW_TEXT).expect("parse below");
+    let above = parse_sum_absent_text(FROZEN_ABOVE_TEXT).expect("parse above");
+    assert_eq!(below.query, [0u8; 32]);
+    assert!(below.left.is_none());
+    assert!(below.verify(&root).is_ok());
+    assert_eq!(above.query, [9u8; 32]);
+    assert!(above.right.is_none());
+    assert!(above.verify(&root).is_ok());
+}
+
+#[test]
+fn rewriting_the_query_onto_a_neighbour_fails() {
+    let rewritten = FROZEN_MID_TEXT.replacen(
+        "account=0202020202020202020202020202020202020202020202020202020202020202",
+        "account=0101010101010101010101010101010101010101010101010101010101010101",
+        1,
+    );
+    let proof = parse_sum_absent_text(&rewritten).expect("still parses");
+    assert!(proof.verify(&frozen_root()).is_err());
 }
