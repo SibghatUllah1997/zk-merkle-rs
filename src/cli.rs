@@ -805,6 +805,15 @@ fn run_solvency(
         for id in report.duplicates() {
             let _ = writeln!(out, "duplicate={}", crate::to_hex32(id));
         }
+        let _ = writeln!(
+            out,
+            "sorted={}",
+            if report.is_sorted_unique() {
+                "yes"
+            } else {
+                "no"
+            }
+        );
         if let Some(r) = report.reserves() {
             let _ = writeln!(out, "reserves={r}");
             let _ = writeln!(out, "reserve_shortfall={short}");
@@ -1323,6 +1332,7 @@ mod tests {
             run_from_args(args(&["solvency", path, "--root", &root, "--sum", "100"])).unwrap();
         assert!(out.starts_with("status=ok\naccounts=2\n"), "{out}");
         assert!(out.contains("total=match\nroot=match\n"));
+        assert!(out.contains("sorted=yes\n"), "{out}");
 
         let err = run_from_args(args(&[
             "solvency",

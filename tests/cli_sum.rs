@@ -261,7 +261,7 @@ fn solvency_matching_snapshot_with_reserves_exits_zero() {
     );
     let text = String::from_utf8(out.stdout).unwrap();
     assert!(text.starts_with("status=ok\naccounts=5\npublished_sum=1500\ncomputed_sum=1500\n"));
-    assert!(text.ends_with("duplicates=0\nreserves=2000\nreserve_shortfall=0\n"));
+    assert!(text.ends_with("duplicates=0\nsorted=yes\nreserves=2000\nreserve_shortfall=0\n"));
 }
 
 #[test]
@@ -297,4 +297,28 @@ fn solvency_flags_duplicate_accounts() {
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("root=match"));
     assert!(err.contains(&format!("duplicates=1\nduplicate={id}")));
+    assert!(err.contains("sorted=no"));
+}
+
+#[test]
+fn solvency_flags_unsorted_unique_accounts() {
+    let path = std::env::temp_dir().join("zk-merkle-cli-solvency-unsorted.csv");
+    let id_hi = to_hex32(&[3u8; 32]);
+    let id_lo = to_hex32(&[1u8; 32]);
+    std::fs::write(&path, format!("{id_hi},8\n{id_lo},40\n")).unwrap();
+    let tree =
+        MerkleSumTree::from_leaves([SumLeaf::new([3; 32], 8), SumLeaf::new([1; 32], 40)]).unwrap();
+    let out = merkle()
+        .args(["solvency", path.to_str().unwrap()])
+        .args(["--root", &to_hex32(&tree.root().unwrap().0), "--sum", "48"])
+        .output()
+        .expect("run merkle");
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(out.status.code(), Some(1));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("status=mismatch"));
+    assert!(err.contains("root=match"));
+    assert!(err.contains("total=match"));
+    assert!(err.contains("duplicates=0"));
+    assert!(err.contains("sorted=no"));
 }
