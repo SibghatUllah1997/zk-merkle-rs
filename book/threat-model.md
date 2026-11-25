@@ -70,7 +70,8 @@ A root is a snapshot. Solvency can change the moment after it is hashed.
 
 Publish the snapshot time, and prefer frequent roots (or a live log of
 roots) over a single quarterly PDF. `committed_root` binds a plain tree
-to its leaf count; it does not bind a sum tree to a timestamp. Put the
+to its leaf count, and `commit_sum_root` binds a sum tree's
+`(hash, total)` the same way. Neither wrap includes a timestamp. Put the
 time next to the hex in the announcement, not only inside a proof file.
 
 ## Other limits that still apply

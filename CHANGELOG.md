@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-25
+
+- `commit_sum_root` wraps the published `(hash, total)` with the leaf count under a new `0x32` tag
+- Inclusion and absence proofs can be checked against that wrap, so a proof for a different-sized tree fails
+- `merkle sum-build` prints `count` and `committed`; pass `--count` to `sum-verify` / `sum-verify-absent` to check it
+
 ## 2026-11-24
 
 - A three-leaf sorted tree now pins the absence-proof text for a missing id, including the gaps below the first leaf and above the last

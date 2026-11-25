@@ -66,11 +66,14 @@ Prints:
 ```text
 root=<64 hex>
 sum=<total>
+count=<leaves>
+committed=<64 hex>
 ```
 
-`sum` is the sum of the CSV amounts. Odd layers promote the last node, so
-the last amount is not counted twice. An unreadable file or empty CSV exits
-1 (empty CSV is treated as a usage problem, exit 2).
+`sum` is the sum of the CSV amounts. `committed` wraps that root with
+`count` so a proof cannot claim a different tree size. Odd layers promote
+the last node, so the last amount is not counted twice. An unreadable file
+or empty CSV exits 1 (empty CSV is treated as a usage problem, exit 2).
 
 ## Export one account's proof
 
@@ -87,10 +90,12 @@ An unknown account id exits 1.
 
 ```bash
 cargo run --features merkle_sum --bin merkle -- sum-verify proof.txt --root <hex> --sum <total>
+cargo run --features merkle_sum --bin merkle -- sum-verify proof.txt --root <hex> --sum <total> --count <n>
 ```
 
-Pass the root and total the exchange published. Prints `ok` with the account
-and amount, or exits 1 and says whether the hash or the total failed.
+Pass the root and total the exchange published. `--count` also checks the
+committed wrap printed by `sum-build`. Prints `ok` with the account and
+amount, or exits 1 and says whether the hash, the total, or the count failed.
 
 ## Prove an account id is missing
 
@@ -105,10 +110,12 @@ to a file. Then:
 
 ```bash
 cargo run --features merkle_sum --bin merkle -- sum-verify-absent absent.txt --root <hex> --sum <total>
+cargo run --features merkle_sum --bin merkle -- sum-verify-absent absent.txt --root <hex> --sum <total> --count <n>
 ```
 
 Prints `ok` with the query account, or exits 1 if the neighbours do not
-bound the query or fail inclusion.
+bound the query, fail inclusion, or (with `--count`) claim a different
+tree size.
 
 ## Solvency check against your own snapshot
 

@@ -52,12 +52,27 @@ SHA-256 or Poseidon. `hash_leaf_with(HashAlgorithm::Rescue, …)` returns
 The reserved tags are exported even when the matching crate feature is off.
 That is the domain *registry*; the hash functions stay behind their flags.
 
+## Merkle sum tags
+
+The `merkle_sum` feature hashes under a separate band, so a sum-tree digest
+cannot be replayed as a plain-tree hash:
+
+| Domain | Constant | Byte | Input |
+| --- | --- | --- | --- |
+| Sum leaf | `SUM_LEAF_PREFIX` | `0x30` | `0x30 \|\| account_id \|\| amount_be128` |
+| Sum parent | `SUM_NODE_PREFIX` | `0x31` | `0x31 \|\| L.hash \|\| L.sum_be \|\| R.hash \|\| R.sum_be` |
+| Sum root commitment | `SUM_ROOT_COMMIT_PREFIX` | `0x32` | `0x32 \|\| leaf_count_be64 \|\| hash \|\| sum_be128` |
+
+`0x32` is the sum-tree counterpart of `0x02`: it binds the published
+`(hash, total)` to how many accounts were listed. See
+[Merkle sum trees](sum-tree.md).
+
 ## What the tags do not do
 
 - They do not make SHA-256 zk-friendly.
 - They do not hide low-entropy leaves. Guessable data still needs a salt.
-- They do not bind a root to its leaf count. That is `0x02` via
-  `commit_root`, described in [Padding](padding.md).
+- They do not bind a plain root to its leaf count. That is `0x02` via
+  `commit_root`, described in [Padding](padding.md). Sum trees use `0x32`.
 - They do not replace algorithm agreement. A verifier must use the same
   `HashAlgorithm` the tree was built with; mixed algorithms fail closed.
 

@@ -57,7 +57,7 @@
 //! - [`chunk`] — split byte buffers into fixed-size leaves
 //! - [`log`] — append-only log with successive Merkle-root checkpoints
 //! - [`features`] — which optional crate features this build compiled with
-//! - `sum` (feature `merkle_sum`) — Merkle sum tree, inclusion proofs, sorted unique leaves, non-inclusion proofs, CSV leaves, layer totals, and serde-ready roots
+//! - `sum` (feature `merkle_sum`) — Merkle sum tree, inclusion proofs, sorted unique leaves, non-inclusion proofs, a published root bound to its leaf count (`commit_sum_root`), CSV leaves, layer totals, and serde-ready roots
 //! - `solvency` (feature `merkle_sum`) — compare a published root and total with an independent liabilities snapshot, including whether account ids are strictly sorted
 //! - `range` (feature `zk-range`) — 64-bit Halo 2 range-check circuit (`0 <= amount < 2^64`)
 //! - `wasm` (feature `wasm`) — wasm-bindgen verifier for plain and sum-tree inclusion proofs

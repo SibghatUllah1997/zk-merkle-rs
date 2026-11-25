@@ -35,10 +35,11 @@ root committed to.
 
 ## Domain tags
 
-| Tag    | Use               |
-|--------|-------------------|
-| `0x30` | Sum-tree leaf     |
-| `0x31` | Sum-tree parent   |
+| Tag    | Use                                      |
+|--------|------------------------------------------|
+| `0x30` | Sum-tree leaf                            |
+| `0x31` | Sum-tree parent                          |
+| `0x32` | Published root bound to its leaf count   |
 
 These do not overlap the plain tree (`0x00`-`0x02`), Poseidon (`0x10`/`0x11`),
 or Rescue (`0x20`/`0x21`) tags.
@@ -116,8 +117,29 @@ assert!(proof.verify(&leaves[2], &root).is_ok());
 # }
 ```
 
-The root does not commit to the leaf count. The count in a proof only fixes
-the expected path shape; check it against the published count separately.
+The bare root hash does not pin the leaf count. `commit_sum_root` wraps
+`(hash, total, leaf_count)` under the `0x32` tag.
+`MerkleSumTree::committed_root` is that wrap, and `verify_committed`
+checks a proof against it, so a path that claims a different tree size
+fails closed.
+
+```rust
+# #[cfg(feature = "merkle_sum")]
+# {
+use merkle_tree::sum::{MerkleSumTree, SumLeaf};
+
+let leaves = [
+    SumLeaf::new([1u8; 32], 40),
+    SumLeaf::new([2u8; 32], 2),
+    SumLeaf::new([3u8; 32], 8),
+];
+let tree = MerkleSumTree::from_leaves(leaves).expect("no overflow");
+let commitment = tree.committed_root().expect("non-empty");
+let proof = tree.prove(2).expect("in range");
+assert!(proof.verify_committed(&leaves[2], commitment, 3).is_ok());
+assert!(proof.verify_committed(&leaves[2], commitment, 4).is_err());
+# }
+```
 
 ## Unique and sorted leaves
 
@@ -157,7 +179,8 @@ assert!(tree.prove_absent(&[1u8; 32]).is_none());
 `merkle sum-absent <file> --account <hex>` prints that proof as
 `key=value` lines (`kind=absent`, the query, then `left.*` / `right.*`
 neighbour fields). `sum-verify-absent` checks it against the published
-root and total. The CSV must already be strictly sorted. The `wasm`
+root and total, and `--count` checks neighbour paths against
+`commit_sum_root`. The CSV must already be strictly sorted. The `wasm`
 feature exposes the same check as `verifySumAbsent`.
 
 An absence proof only shows that one id is missing from *this* tree. It
@@ -182,10 +205,13 @@ prints:
 ```text
 root=<64 hex>
 sum=<total>
+count=<leaves>
+committed=<64 hex>
 ```
 
-The total is the sum of the CSV amounts. Odd layers still promote the last
-node, so the last amount is not counted twice.
+`sum` is the sum of the CSV amounts. `committed` is `commit_sum_root` of
+that root and `count`. Odd layers still promote the last node, so the last
+amount is not counted twice.
 
 ## Exporting and checking one account's proof
 
@@ -204,9 +230,10 @@ There is one `step=` line per level, from the leaf up. `sum_proof_to_text`
 and `parse_sum_proof_text` write and read the same format from the library,
 so it works without `serde`.
 
-`merkle sum-verify <proof-file> --root <hex> --sum <total>` checks it. It
-prints `ok` with the account and amount, or exits with code 1 and says
-whether the hash or the total did not match.
+`merkle sum-verify <proof-file> --root <hex> --sum <total> [--count <n>]`
+checks it. It prints `ok` with the account and amount, or exits with code 1
+and says whether the hash, the total, or the leaf count did not match.
+`--count` binds the rebuilt root with `commit_sum_root`.
 
 The proof file does not carry the root. The user should pass the root and
 total the exchange published, so a proof file cannot vouch for itself.

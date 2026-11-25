@@ -64,3 +64,13 @@ ids so two neighbouring leaves can bound a missing id.
 46. [x] Add a `wasm-bindgen` verifier for non-inclusion proofs
 47. [x] Pin frozen vectors for absence-proof text and the published root they verify against
 48. [x] Report unsorted snapshots in the solvency check so absence proofs remain meaningful
+
+## Phase 4: Bound published sum roots
+
+A sum-tree root hash does not pin how many accounts were listed.
+Inclusion and absence proofs carry `leaf_count` only to fix the path
+shape. Binding the published `(hash, total)` to that count makes a
+proof for a different-sized tree fail closed.
+
+49. [x] Bind `(hash, total, leaf_count)` with `commit_sum_root` (`0x32`) and verify inclusion proofs against it
+50. [x] Verify absence proofs against the same wrap, and print `count` / `committed` from `sum-build`
