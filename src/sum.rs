@@ -572,6 +572,16 @@ impl MerkleSumTree {
         self.layers.last().and_then(|layer| layer.first()).copied()
     }
 
+    /// Published root bound to this tree's leaf count via [`commit_sum_root`].
+    ///
+    /// Returns `None` for an empty tree. Prefer this over the bare
+    /// `(hash, total)` when a verifier should reject a proof that claims a
+    /// different number of accounts.
+    pub fn committed_root(&self) -> Option<[u8; 32]> {
+        self.root_node()
+            .map(|node| commit_sum_root(&node, self.len() as u64))
+    }
+
     /// Number of leaves.
     pub fn len(&self) -> usize {
         self.leaves.len()
@@ -647,9 +657,9 @@ pub struct SumInclusionProof {
     pub leaf_index: usize,
     /// Number of leaves in the tree the proof was made for.
     ///
-    /// This fixes the expected path shape. The root does not commit to the
-    /// leaf count, so it is not a substitute for checking the published
-    /// count separately.
+    /// This fixes the expected path shape. The bare root hash does not pin
+    /// that count; publish [`commit_sum_root`] and check it with
+    /// [`Self::verify_committed`].
     pub leaf_count: usize,
     /// Sibling nodes from the leaf layer up to just below the root.
     pub steps: Vec<SumProofStep>,
@@ -688,6 +698,16 @@ pub enum SumProofError {
         /// Total claimed by the root.
         expected: u128,
     },
+    /// The proof's stored leaf count does not match the published count.
+    CountMismatch {
+        /// `leaf_count` carried in the proof.
+        claimed: usize,
+        /// Count the publisher bound into [`commit_sum_root`].
+        expected: usize,
+    },
+    /// The rebuilt `(hash, total, leaf_count)` wrap does not match the
+    /// published commitment.
+    CommitmentMismatch,
 }
 
 impl core::fmt::Display for SumProofError {
@@ -707,6 +727,15 @@ impl core::fmt::Display for SumProofError {
                     f,
                     "rebuilt total {computed} does not match root total {expected}"
                 )
+            }
+            SumProofError::CountMismatch { claimed, expected } => {
+                write!(
+                    f,
+                    "proof is for {claimed} leaves, published count is {expected}"
+                )
+            }
+            SumProofError::CommitmentMismatch => {
+                write!(f, "rebuilt root does not match the committed sum root")
             }
         }
     }
@@ -767,6 +796,46 @@ impl SumInclusionProof {
                 computed: computed.sum,
                 expected: root.sum,
             });
+        }
+        Ok(())
+    }
+
+    /// Verify `leaf` against a published [`commit_sum_root`] wrap.
+    ///
+    /// Rebuilds the path like [`Self::verify`], then checks that this
+    /// proof's stored count is exactly `leaf_count` and that the wrap of
+    /// the rebuilt node matches `commitment`. A proof for a different
+    /// sized tree fails even when the bare root hash would still match.
+    ///
+    /// ```
+    /// use merkle_tree::sum::{MerkleSumTree, SumLeaf};
+    ///
+    /// let leaves = [
+    ///     SumLeaf::new([1u8; 32], 40),
+    ///     SumLeaf::new([2u8; 32], 2),
+    ///     SumLeaf::new([3u8; 32], 8),
+    /// ];
+    /// let tree = MerkleSumTree::from_leaves(leaves).expect("no overflow");
+    /// let commitment = tree.committed_root().expect("non-empty");
+    /// let proof = tree.prove(1).expect("in range");
+    /// assert!(proof.verify_committed(&leaves[1], commitment, 3).is_ok());
+    /// assert!(proof.verify_committed(&leaves[1], commitment, 4).is_err());
+    /// ```
+    pub fn verify_committed(
+        &self,
+        leaf: &SumLeaf,
+        commitment: [u8; 32],
+        leaf_count: usize,
+    ) -> Result<(), SumProofError> {
+        if self.leaf_count != leaf_count {
+            return Err(SumProofError::CountMismatch {
+                claimed: self.leaf_count,
+                expected: leaf_count,
+            });
+        }
+        let computed = self.compute_root(leaf)?;
+        if commit_sum_root(&computed, leaf_count as u64) != commitment {
+            return Err(SumProofError::CommitmentMismatch);
         }
         Ok(())
     }
@@ -1961,13 +2030,52 @@ mod tests {
             let ls = leaves(n);
             let tree = MerkleSumTree::from_leaves(ls.clone()).expect("fits");
             let root = tree.root_node().expect("non-empty");
+            let commitment = tree.committed_root().expect("non-empty");
+            assert_eq!(commitment, commit_sum_root(&root, u64::from(n)), "n={n}");
             for (i, l) in ls.iter().enumerate() {
                 let proof = tree.prove(i).expect("in range");
                 assert_eq!(proof.compute_root(l), Ok(root), "n={n} i={i}");
                 assert_eq!(proof.verify(l, &root), Ok(()), "n={n} i={i}");
+                assert_eq!(
+                    proof.verify_committed(l, commitment, usize::from(n)),
+                    Ok(()),
+                    "n={n} i={i}"
+                );
             }
             assert_eq!(tree.prove(ls.len()), None);
         }
+    }
+
+    #[test]
+    fn empty_tree_has_no_committed_root() {
+        let empty = MerkleSumTree::from_leaves([]).expect("empty");
+        assert!(empty.committed_root().is_none());
+        assert!(empty.root_node().is_none());
+    }
+
+    #[test]
+    fn committed_verification_rejects_a_wrong_count() {
+        let ls = leaves(4);
+        let tree = MerkleSumTree::from_leaves(ls.clone()).expect("fits");
+        let commitment = tree.committed_root().expect("non-empty");
+        let proof = tree.prove(0).expect("in range");
+        assert_eq!(
+            proof.verify_committed(&ls[0], commitment, 5),
+            Err(SumProofError::CountMismatch {
+                claimed: 4,
+                expected: 5
+            })
+        );
+        let other = MerkleSumTree::from_leaves(leaves(3)).expect("fits");
+        let foreign = other.committed_root().expect("non-empty");
+        assert_eq!(
+            proof.verify_committed(&ls[0], foreign, 4),
+            Err(SumProofError::CommitmentMismatch)
+        );
+        assert_eq!(
+            SumProofError::CommitmentMismatch.to_string(),
+            "rebuilt root does not match the committed sum root"
+        );
     }
 
     #[test]

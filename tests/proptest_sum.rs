@@ -170,6 +170,31 @@ proptest! {
     }
 
     #[test]
+    fn honest_proofs_verify_against_the_committed_root(
+        leaves in nonempty_leaves(),
+        which in any::<prop::sample::Index>(),
+    ) {
+        let tree = MerkleSumTree::from_leaves(leaves.clone()).expect("small amounts fit");
+        let commitment = tree.committed_root().expect("non-empty");
+        let n = leaves.len();
+        let i = which.index(n);
+        let proof = tree.prove(i).expect("in range");
+        prop_assert_eq!(proof.verify_committed(&leaves[i], commitment, n), Ok(()));
+        prop_assert_eq!(
+            proof.verify_committed(&leaves[i], commitment, n + 1),
+            Err(SumProofError::CountMismatch {
+                claimed: n,
+                expected: n + 1
+            })
+        );
+        let lie = SumLeaf::new(leaves[i].account_id, leaves[i].amount ^ 1);
+        prop_assert_eq!(
+            proof.verify_committed(&lie, commitment, n),
+            Err(SumProofError::CommitmentMismatch)
+        );
+    }
+
+    #[test]
     fn tampered_sibling_amount_fails_when_the_path_has_steps(
         leaves in prop::collection::vec(sum_leaf(), 2..=16),
         which in any::<prop::sample::Index>(),
