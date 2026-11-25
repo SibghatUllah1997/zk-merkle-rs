@@ -9,8 +9,9 @@
 //! Encoding (SHA-256, audited `sha2` crate):
 //! - Leaf: `SHA-256(0x30 || account_id || amount as u128 big-endian)`
 //! - Node: `SHA-256(0x31 || left.hash || left.sum_be || right.hash || right.sum_be)`
+//! - Published root: `SHA-256(0x32 || leaf_count_be64 || hash || sum_be128)`
 //!
-//! The `0x30`/`0x31` tags never collide with the plain tree tags
+//! The `0x30`/`0x31`/`0x32` tags never collide with the plain tree tags
 //! (`0x00`/`0x01`/`0x02`), Poseidon (`0x10`/`0x11`), or Rescue (`0x20`/`0x21`),
 //! so a sum-tree hash can never be replayed as a plain-tree hash.
 //!
@@ -53,6 +54,9 @@ pub const SUM_LEAF_PREFIX: u8 = 0x30;
 
 /// Domain tag for a sum-tree parent hash (`0x31`).
 pub const SUM_NODE_PREFIX: u8 = 0x31;
+
+/// Domain tag for a published sum-tree root bound to its leaf count (`0x32`).
+pub const SUM_ROOT_COMMIT_PREFIX: u8 = 0x32;
 
 /// Fixed-width account identifier committed in a sum-tree leaf.
 pub type AccountId = [u8; 32];
@@ -137,6 +141,38 @@ pub fn hash_sum_nodes(left: &SumNode, right: &SumNode) -> [u8; 32] {
     hasher.update(left.sum.to_be_bytes());
     hasher.update(right.hash);
     hasher.update(right.sum.to_be_bytes());
+    hasher.finalize().into()
+}
+
+/// Bind a published `(hash, total)` to the number of leaves beneath it.
+///
+/// Encoding: `SHA-256(0x32 || leaf_count as u64 big-endian || hash || sum as u128 big-endian)`.
+///
+/// The bare root hash already commits to every balance, but it does not pin
+/// how many accounts were listed. Inclusion proofs carry `leaf_count` only
+/// to fix the path shape. Publishing this wrap lets a verifier reject a
+/// proof that claims a different tree size.
+///
+/// ```
+/// use merkle_tree::sum::{commit_sum_root, MerkleSumTree, SumLeaf};
+///
+/// let leaves = [
+///     SumLeaf::new([1u8; 32], 40),
+///     SumLeaf::new([2u8; 32], 2),
+///     SumLeaf::new([3u8; 32], 8),
+/// ];
+/// let tree = MerkleSumTree::from_leaves(leaves).expect("no overflow");
+/// let root = tree.root_node().expect("non-empty");
+/// let bound = commit_sum_root(&root, 3);
+/// assert_ne!(bound, root.hash);
+/// assert_ne!(bound, commit_sum_root(&root, 4));
+/// ```
+pub fn commit_sum_root(root: &SumNode, leaf_count: u64) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update([SUM_ROOT_COMMIT_PREFIX]);
+    hasher.update(leaf_count.to_be_bytes());
+    hasher.update(root.hash);
+    hasher.update(root.sum.to_be_bytes());
     hasher.finalize().into()
 }
 
@@ -1418,8 +1454,41 @@ mod tests {
             RESCUE_NODE_PREFIX,
         ];
         assert_ne!(SUM_LEAF_PREFIX, SUM_NODE_PREFIX);
+        assert_ne!(SUM_LEAF_PREFIX, SUM_ROOT_COMMIT_PREFIX);
+        assert_ne!(SUM_NODE_PREFIX, SUM_ROOT_COMMIT_PREFIX);
         assert!(!others.contains(&SUM_LEAF_PREFIX));
         assert!(!others.contains(&SUM_NODE_PREFIX));
+        assert!(!others.contains(&SUM_ROOT_COMMIT_PREFIX));
+    }
+
+    #[test]
+    fn commit_sum_root_matches_manual_encoding() {
+        let root = SumNode::new([9u8; 32], 50);
+        let mut buf = [0u8; 1 + 8 + 32 + 16];
+        buf[0] = 0x32;
+        buf[1..9].copy_from_slice(&3u64.to_be_bytes());
+        buf[9..41].copy_from_slice(&[9u8; 32]);
+        buf[41..].copy_from_slice(&50u128.to_be_bytes());
+        let expected: [u8; 32] = Sha256::digest(buf).into();
+        assert_eq!(commit_sum_root(&root, 3), expected);
+    }
+
+    #[test]
+    fn commit_sum_root_binds_count_hash_and_total() {
+        let root = SumNode::new([1u8; 32], 10);
+        assert_ne!(commit_sum_root(&root, 1), commit_sum_root(&root, 2));
+        assert_ne!(
+            commit_sum_root(&root, 1),
+            commit_sum_root(&SumNode::new([2u8; 32], 10), 1)
+        );
+        assert_ne!(
+            commit_sum_root(&root, 1),
+            commit_sum_root(&SumNode::new([1u8; 32], 11), 1)
+        );
+        assert_ne!(
+            commit_sum_root(&root, 4),
+            crate::hashing::commit_root(&root.hash, 4)
+        );
     }
 
     #[test]

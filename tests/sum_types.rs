@@ -1,7 +1,9 @@
 //! Merkle sum leaf and node types through the public API.
 #![cfg(feature = "merkle_sum")]
 
-use merkle_tree::sum::{hash_sum_nodes, SUM_LEAF_PREFIX, SUM_NODE_PREFIX};
+use merkle_tree::sum::{
+    commit_sum_root, hash_sum_nodes, SUM_LEAF_PREFIX, SUM_NODE_PREFIX, SUM_ROOT_COMMIT_PREFIX,
+};
 use merkle_tree::{MerkleSumTree, SumLeaf, SumNode, SumOverflow};
 use proptest::prelude::*;
 
@@ -67,6 +69,24 @@ fn overflow_is_an_error() {
 fn prefixes_are_distinct() {
     assert_eq!(SUM_LEAF_PREFIX, 0x30);
     assert_eq!(SUM_NODE_PREFIX, 0x31);
+    assert_eq!(SUM_ROOT_COMMIT_PREFIX, 0x32);
+    assert_ne!(SUM_LEAF_PREFIX, SUM_ROOT_COMMIT_PREFIX);
+    assert_ne!(SUM_NODE_PREFIX, SUM_ROOT_COMMIT_PREFIX);
+}
+
+#[test]
+fn committed_wrap_is_not_the_bare_root_hash() {
+    let tree = MerkleSumTree::from_leaves([
+        SumLeaf::new([1; 32], 40),
+        SumLeaf::new([2; 32], 2),
+        SumLeaf::new([3; 32], 8),
+    ])
+    .unwrap();
+    let root = tree.root_node().unwrap();
+    let bound = commit_sum_root(&root, 3);
+    assert_ne!(bound, root.hash);
+    assert_eq!(bound, commit_sum_root(&root, tree.len() as u64));
+    assert_ne!(bound, commit_sum_root(&root, 2));
 }
 
 proptest! {
