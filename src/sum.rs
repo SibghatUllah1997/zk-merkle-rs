@@ -947,17 +947,15 @@ impl From<SumProofError> for AbsenceError {
 }
 
 impl SumAbsenceProof {
-    /// Check that `query` sits in a gap of the tree with root `root`.
-    ///
-    /// Neighbour inclusion is verified first, then the indices must be
-    /// consecutive (or the first / last leaf for an end gap) and the account
-    /// ids must strictly sandwich `query`. Non-adjacent neighbours would let
-    /// a skipped leaf hide in the gap.
-    pub fn verify(&self, root: &SumNode) -> Result<(), AbsenceError> {
+    /// Check neighbouring inclusion, then that the neighbours bound `query`.
+    fn check_neighbors<F>(&self, mut check: F) -> Result<(), AbsenceError>
+    where
+        F: FnMut(&SumAbsenceNeighbor) -> Result<(), AbsenceError>,
+    {
         match (&self.left, &self.right) {
             (None, None) => Err(AbsenceError::EmptyNeighbors),
             (Some(left), None) => {
-                left.proof.verify(&left.leaf, root)?;
+                check(left)?;
                 if left.proof.leaf_index + 1 != left.proof.leaf_count {
                     return Err(AbsenceError::NotLast {
                         index: left.proof.leaf_index,
@@ -970,7 +968,7 @@ impl SumAbsenceProof {
                 Ok(())
             }
             (None, Some(right)) => {
-                right.proof.verify(&right.leaf, root)?;
+                check(right)?;
                 if right.proof.leaf_index != 0 {
                     return Err(AbsenceError::NotFirst {
                         index: right.proof.leaf_index,
@@ -982,8 +980,8 @@ impl SumAbsenceProof {
                 Ok(())
             }
             (Some(left), Some(right)) => {
-                left.proof.verify(&left.leaf, root)?;
-                right.proof.verify(&right.leaf, root)?;
+                check(left)?;
+                check(right)?;
                 if left.proof.leaf_count != right.proof.leaf_count {
                     return Err(AbsenceError::LeafCountMismatch {
                         left: left.proof.leaf_count,
@@ -1002,6 +1000,50 @@ impl SumAbsenceProof {
                 Ok(())
             }
         }
+    }
+
+    /// Check that `query` sits in a gap of the tree with root `root`.
+    ///
+    /// Neighbour inclusion is verified first, then the indices must be
+    /// consecutive (or the first / last leaf for an end gap) and the account
+    /// ids must strictly sandwich `query`. Non-adjacent neighbours would let
+    /// a skipped leaf hide in the gap.
+    pub fn verify(&self, root: &SumNode) -> Result<(), AbsenceError> {
+        self.check_neighbors(|neighbor| {
+            neighbor
+                .proof
+                .verify(&neighbor.leaf, root)
+                .map_err(Into::into)
+        })
+    }
+
+    /// Like [`Self::verify`], but neighbour paths must match a published
+    /// [`commit_sum_root`] wrap for `leaf_count` accounts.
+    ///
+    /// ```
+    /// use merkle_tree::sum::{MerkleSumTree, SumLeaf};
+    ///
+    /// let tree = MerkleSumTree::from_sorted_leaves([
+    ///     SumLeaf::new([1u8; 32], 40),
+    ///     SumLeaf::new([3u8; 32], 8),
+    /// ])
+    /// .expect("sorted");
+    /// let commitment = tree.committed_root().expect("non-empty");
+    /// let proof = tree.prove_absent(&[2u8; 32]).expect("missing");
+    /// assert!(proof.verify_committed(commitment, 2).is_ok());
+    /// assert!(proof.verify_committed(commitment, 3).is_err());
+    /// ```
+    pub fn verify_committed(
+        &self,
+        commitment: [u8; 32],
+        leaf_count: usize,
+    ) -> Result<(), AbsenceError> {
+        self.check_neighbors(|neighbor| {
+            neighbor
+                .proof
+                .verify_committed(&neighbor.leaf, commitment, leaf_count)
+                .map_err(Into::into)
+        })
     }
 }
 
@@ -1861,6 +1903,8 @@ mod tests {
         assert_eq!(proof.left.as_ref().unwrap().leaf.account_id, [1u8; 32]);
         assert_eq!(proof.right.as_ref().unwrap().leaf.account_id, [3u8; 32]);
         assert_eq!(proof.verify(&root), Ok(()));
+        let commitment = tree.committed_root().unwrap();
+        assert_eq!(proof.verify_committed(commitment, 3), Ok(()));
         assert!(tree.prove_absent(&[3u8; 32]).is_none());
     }
 
@@ -1878,6 +1922,31 @@ mod tests {
         assert!(above.right.is_none());
         assert_eq!(above.left.as_ref().unwrap().proof.leaf_index, 1);
         assert_eq!(above.verify(&root), Ok(()));
+
+        let commitment = tree.committed_root().unwrap();
+        assert_eq!(below.verify_committed(commitment, 2), Ok(()));
+        assert_eq!(above.verify_committed(commitment, 2), Ok(()));
+    }
+
+    #[test]
+    fn absence_committed_verification_rejects_a_wrong_count() {
+        let tree = MerkleSumTree::from_sorted_leaves([leaf(1, 10), leaf(3, 20), leaf(5, 30)])
+            .expect("sorted");
+        let commitment = tree.committed_root().unwrap();
+        let proof = tree.prove_absent(&[2u8; 32]).expect("missing");
+        assert_eq!(
+            proof.verify_committed(commitment, 4),
+            Err(AbsenceError::Inclusion(SumProofError::CountMismatch {
+                claimed: 3,
+                expected: 4
+            }))
+        );
+        let other = MerkleSumTree::from_sorted_leaves([leaf(1, 10), leaf(3, 20)]).expect("sorted");
+        let foreign = other.committed_root().unwrap();
+        assert_eq!(
+            proof.verify_committed(foreign, 3),
+            Err(AbsenceError::Inclusion(SumProofError::CommitmentMismatch))
+        );
     }
 
     #[test]

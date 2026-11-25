@@ -313,6 +313,16 @@ proptest! {
                 prop_assert_eq!(right.proof.verify(&right.leaf, &root), Ok(()));
             }
             prop_assert!(proof.left.is_some() || proof.right.is_some());
+            let commitment = tree.committed_root().expect("non-empty");
+            let n = leaves.len();
+            prop_assert_eq!(proof.verify_committed(commitment, n), Ok(()));
+            prop_assert_eq!(
+                proof.verify_committed(commitment, n + 1),
+                Err(AbsenceError::Inclusion(SumProofError::CountMismatch {
+                    claimed: n,
+                    expected: n + 1
+                }))
+            );
         }
     }
 
