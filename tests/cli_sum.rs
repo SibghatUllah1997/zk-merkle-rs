@@ -1,7 +1,7 @@
 //! End-to-end check of `merkle sum-build` (needs `std` and `merkle_sum`).
 
 use merkle_tree::hashing::to_hex32;
-use merkle_tree::sum::{MerkleSumTree, SumLeaf};
+use merkle_tree::sum::{commit_sum_root, MerkleSumTree, SumLeaf};
 use std::process::Command;
 
 fn merkle() -> Command {
@@ -40,8 +40,17 @@ fn sum_build_prints_root_hash_and_total() {
     ])
     .unwrap();
     let (hash, total) = tree.root().unwrap();
-    assert_eq!(printed, format!("root={}\nsum={total}\n", to_hex32(&hash)));
+    let committed = tree.committed_root().unwrap();
+    assert_eq!(
+        printed,
+        format!(
+            "root={}\nsum={total}\ncount=3\ncommitted={}\n",
+            to_hex32(&hash),
+            to_hex32(&committed)
+        )
+    );
     assert_eq!(total, 50);
+    assert_eq!(committed, commit_sum_root(&tree.root_node().unwrap(), 3));
 }
 
 #[test]
@@ -111,6 +120,24 @@ fn sum_prove_exports_a_proof_that_sum_verify_accepts() {
         String::from_utf8(ok.stdout).unwrap(),
         format!("ok\naccount={account}\namount=400\n")
     );
+
+    let counted = merkle()
+        .args(["sum-verify", proof_path.to_str().unwrap(), "--root", &root])
+        .args(["--sum", &total.to_string(), "--count", "5"])
+        .output()
+        .expect("run merkle");
+    assert!(
+        counted.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&counted.stderr)
+    );
+    let bad_count = merkle()
+        .args(["sum-verify", proof_path.to_str().unwrap(), "--root", &root])
+        .args(["--sum", &total.to_string(), "--count", "4"])
+        .output()
+        .expect("run merkle");
+    assert_eq!(bad_count.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&bad_count.stderr).contains("published count is 4"));
 
     let wrong_root = to_hex32(&[0u8; 32]);
     let bad = merkle()

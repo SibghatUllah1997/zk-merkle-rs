@@ -37,6 +37,8 @@ pub enum Command {
         path: String,
         root: [u8; 32],
         sum: u128,
+        /// When set, also bind the rebuilt root to this leaf count.
+        count: Option<usize>,
     },
     /// Export a non-inclusion proof for an account missing from a sorted CSV.
     SumAbsent {
@@ -48,6 +50,8 @@ pub enum Command {
         path: String,
         root: [u8; 32],
         sum: u128,
+        /// When set, also bind neighbour proofs to this leaf count.
+        count: Option<usize>,
     },
     /// Compare a published root and total with a liabilities snapshot CSV.
     Solvency {
@@ -67,6 +71,7 @@ pub enum CliError {
     UnknownFlag(String),
     MissingValue(&'static str),
     InvalidIndex(String),
+    InvalidCount(String),
     EmptyLeaves,
     IndexOutOfRange {
         index: usize,
@@ -107,6 +112,7 @@ impl std::fmt::Display for CliError {
             CliError::UnknownFlag(flag) => write!(f, "unknown flag {flag:?}\n\n{}", usage()),
             CliError::MissingValue(name) => write!(f, "missing value for {name}"),
             CliError::InvalidIndex(raw) => write!(f, "invalid leaf index {raw:?}"),
+            CliError::InvalidCount(raw) => write!(f, "invalid leaf count {raw:?}"),
             CliError::EmptyLeaves => write!(f, "expected at least one leaf"),
             CliError::IndexOutOfRange { index, leaf_count } => {
                 write!(f, "index {index} is out of range for {leaf_count} leaves")
@@ -171,6 +177,7 @@ impl CliError {
             | CliError::UnknownFlag(_)
             | CliError::MissingValue(_)
             | CliError::InvalidIndex(_)
+            | CliError::InvalidCount(_)
             | CliError::InvalidSum(_)
             | CliError::EmptyLeaves => 2,
             #[cfg(feature = "merkle_sum")]
@@ -190,14 +197,15 @@ pub fn usage() -> &'static str {
         "    merkle verify --leaf <data> --root <hex> [--steps <L|R:hex,...>]\n",
         "    merkle sum-build <csv-file>\n",
         "    merkle sum-prove <csv-file> --account <hex>\n",
-        "    merkle sum-verify <proof-file> --root <hex> --sum <total>\n",
+        "    merkle sum-verify <proof-file> --root <hex> --sum <total> [--count <n>]\n",
         "    merkle sum-absent <csv-file> --account <hex>\n",
-        "    merkle sum-verify-absent <proof-file> --root <hex> --sum <total>\n",
+        "    merkle sum-verify-absent <proof-file> --root <hex> --sum <total> [--count <n>]\n",
         "    merkle solvency <csv-file> --root <hex> --sum <total> [--reserves <amount>]\n",
         "    merkle help\n\n",
         "Leaves are UTF-8 strings. Proof steps are comma-separated L:/R: hex tokens.\n",
         "sum-build reads account_id,amount CSV (32-byte hex id, decimal u128) and needs merkle_sum.\n",
         "sum-prove prints a proof file for one account; sum-verify checks it against the published root and sum.\n",
+        "sum-build also prints count and committed, a wrap of (hash, total, leaf count). Pass --count to check it.\n",
         "sum-absent prints a non-inclusion proof for a missing id in a strictly sorted CSV; sum-verify-absent checks it.\n",
         "solvency rebuilds the tree from your own liabilities CSV and compares it with the published root and sum."
     )
@@ -465,10 +473,11 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<str>,
 {
-    let (path, values) = match parse_file_and_flags(args, "sum-verify", &["--root", "--sum"])? {
-        None => return Ok(Command::Help),
-        Some(parsed) => parsed,
-    };
+    let (path, values) =
+        match parse_file_and_flags(args, "sum-verify", &["--root", "--sum", "--count"])? {
+            None => return Ok(Command::Help),
+            Some(parsed) => parsed,
+        };
     let root = parse_root(
         values[0]
             .as_deref()
@@ -480,7 +489,13 @@ where
     let sum = raw_sum
         .parse::<u128>()
         .map_err(|_| CliError::InvalidSum(String::from(raw_sum)))?;
-    Ok(Command::SumVerify { path, root, sum })
+    let count = values[2].as_deref().map(parse_count).transpose()?;
+    Ok(Command::SumVerify {
+        path,
+        root,
+        sum,
+        count,
+    })
 }
 
 fn parse_sum_absent<I, S>(args: I) -> Result<Command, CliError>
@@ -505,7 +520,7 @@ where
     S: AsRef<str>,
 {
     let (path, values) =
-        match parse_file_and_flags(args, "sum-verify-absent", &["--root", "--sum"])? {
+        match parse_file_and_flags(args, "sum-verify-absent", &["--root", "--sum", "--count"])? {
             None => return Ok(Command::Help),
             Some(parsed) => parsed,
         };
@@ -520,12 +535,23 @@ where
     let sum = raw_sum
         .parse::<u128>()
         .map_err(|_| CliError::InvalidSum(String::from(raw_sum)))?;
-    Ok(Command::SumVerifyAbsent { path, root, sum })
+    let count = values[2].as_deref().map(parse_count).transpose()?;
+    Ok(Command::SumVerifyAbsent {
+        path,
+        root,
+        sum,
+        count,
+    })
 }
 
 fn parse_amount(raw: &str) -> Result<u128, CliError> {
     raw.parse::<u128>()
         .map_err(|_| CliError::InvalidSum(String::from(raw)))
+}
+
+fn parse_count(raw: &str) -> Result<usize, CliError> {
+    raw.parse::<usize>()
+        .map_err(|_| CliError::InvalidCount(String::from(raw)))
 }
 
 fn parse_solvency<I, S>(args: I) -> Result<Command, CliError>
@@ -575,9 +601,19 @@ pub fn run(command: Command) -> Result<String, CliError> {
         Command::Verify { leaf, root, steps } => run_verify(&leaf, root, &steps),
         Command::SumBuild { path } => run_sum_build(&path),
         Command::SumProve { path, account } => run_sum_prove(&path, &account),
-        Command::SumVerify { path, root, sum } => run_sum_verify(&path, root, sum),
+        Command::SumVerify {
+            path,
+            root,
+            sum,
+            count,
+        } => run_sum_verify(&path, root, sum, count),
         Command::SumAbsent { path, account } => run_sum_absent(&path, &account),
-        Command::SumVerifyAbsent { path, root, sum } => run_sum_verify_absent(&path, root, sum),
+        Command::SumVerifyAbsent {
+            path,
+            root,
+            sum,
+            count,
+        } => run_sum_verify_absent(&path, root, sum, count),
         Command::Solvency {
             path,
             root,
@@ -648,7 +684,13 @@ fn run_sum_build(path: &str) -> Result<String, CliError> {
         let leaves = parse_sum_csv(&text).map_err(CliError::SumCsv)?;
         let tree = MerkleSumTree::from_leaves(leaves).map_err(CliError::SumOverflow)?;
         let (hash, total) = tree.root().expect("parse_sum_csv rejects empty input");
-        Ok(format!("root={}\nsum={total}\n", to_hex32(&hash)))
+        let committed = tree.committed_root().expect("non-empty");
+        Ok(format!(
+            "root={}\nsum={total}\ncount={}\ncommitted={}\n",
+            to_hex32(&hash),
+            tree.len(),
+            to_hex32(&committed)
+        ))
     }
 }
 
@@ -683,21 +725,34 @@ fn run_sum_prove(path: &str, account: &[u8; 32]) -> Result<String, CliError> {
     }
 }
 
-fn run_sum_verify(path: &str, root: [u8; 32], sum: u128) -> Result<String, CliError> {
+fn run_sum_verify(
+    path: &str,
+    root: [u8; 32],
+    sum: u128,
+    count: Option<usize>,
+) -> Result<String, CliError> {
     #[cfg(not(feature = "merkle_sum"))]
     {
-        let _ = (path, root, sum);
+        let _ = (path, root, sum, count);
         Err(needs_merkle_sum("sum-verify"))
     }
     #[cfg(feature = "merkle_sum")]
     {
-        use crate::sum::{parse_sum_proof_text, SumNode};
+        use crate::sum::{commit_sum_root, parse_sum_proof_text, SumNode};
 
         let (leaf, proof) =
             parse_sum_proof_text(&read_file(path)?).map_err(CliError::SumProofText)?;
-        proof
-            .verify(&leaf, &SumNode::new(root, sum))
-            .map_err(CliError::SumProof)?;
+        let published = SumNode::new(root, sum);
+        if let Some(count) = count {
+            let commitment = commit_sum_root(&published, count as u64);
+            proof
+                .verify_committed(&leaf, commitment, count)
+                .map_err(CliError::SumProof)?;
+        } else {
+            proof
+                .verify(&leaf, &published)
+                .map_err(CliError::SumProof)?;
+        }
         Ok(format!(
             "ok\naccount={}\namount={}\n",
             crate::to_hex32(&leaf.account_id),
@@ -728,20 +783,31 @@ fn run_sum_absent(path: &str, account: &[u8; 32]) -> Result<String, CliError> {
     }
 }
 
-fn run_sum_verify_absent(path: &str, root: [u8; 32], sum: u128) -> Result<String, CliError> {
+fn run_sum_verify_absent(
+    path: &str,
+    root: [u8; 32],
+    sum: u128,
+    count: Option<usize>,
+) -> Result<String, CliError> {
     #[cfg(not(feature = "merkle_sum"))]
     {
-        let _ = (path, root, sum);
+        let _ = (path, root, sum, count);
         Err(needs_merkle_sum("sum-verify-absent"))
     }
     #[cfg(feature = "merkle_sum")]
     {
-        use crate::sum::{parse_sum_absent_text, SumNode};
+        use crate::sum::{commit_sum_root, parse_sum_absent_text, SumNode};
 
         let proof = parse_sum_absent_text(&read_file(path)?).map_err(CliError::SumProofText)?;
-        proof
-            .verify(&SumNode::new(root, sum))
-            .map_err(CliError::Absence)?;
+        let published = SumNode::new(root, sum);
+        if let Some(count) = count {
+            let commitment = commit_sum_root(&published, count as u64);
+            proof
+                .verify_committed(commitment, count)
+                .map_err(CliError::Absence)?;
+        } else {
+            proof.verify(&published).map_err(CliError::Absence)?;
+        }
         Ok(format!(
             "ok\naccount={}\nabsent\n",
             crate::to_hex32(&proof.query)
@@ -1041,7 +1107,15 @@ mod tests {
             ])
             .unwrap();
             let (hash, total) = tree.root().unwrap();
-            assert_eq!(out, format!("root={}\nsum={total}\n", to_hex32(&hash)));
+            let committed = tree.committed_root().unwrap();
+            assert_eq!(
+                out,
+                format!(
+                    "root={}\nsum={total}\ncount=2\ncommitted={}\n",
+                    to_hex32(&hash),
+                    to_hex32(&committed)
+                )
+            );
             assert_eq!(total, 42);
             let _ = std::fs::remove_file(&path);
         }
@@ -1071,8 +1145,39 @@ mod tests {
                 path: String::from("p.txt"),
                 root: [8u8; 32],
                 sum: 50,
+                count: None,
             }
         );
+        assert_eq!(
+            parse_args(args(&[
+                "sum-verify",
+                "p.txt",
+                "--root",
+                &root,
+                "--sum=50",
+                "--count",
+                "3"
+            ]))
+            .unwrap(),
+            Command::SumVerify {
+                path: String::from("p.txt"),
+                root: [8u8; 32],
+                sum: 50,
+                count: Some(3),
+            }
+        );
+        let err = parse_args(args(&[
+            "sum-verify",
+            "p.txt",
+            "--root",
+            &root,
+            "--sum=50",
+            "--count",
+            "nope",
+        ]))
+        .unwrap_err();
+        assert_eq!(err, CliError::InvalidCount(String::from("nope")));
+        assert_eq!(err.exit_code(), 2);
         assert_eq!(
             parse_args(args(&["sum-prove", "b.csv"])).unwrap_err(),
             CliError::MissingValue("--account")
@@ -1129,6 +1234,7 @@ mod tests {
                 path: String::from("p.txt"),
                 root: [8u8; 32],
                 sum: 50,
+                count: None,
             }
         );
     }
@@ -1180,6 +1286,37 @@ mod tests {
         ]))
         .unwrap_err();
         assert_eq!(err, CliError::AccountNotFound(missing));
+
+        let ok_count = run_from_args(args(&[
+            "sum-verify",
+            p,
+            "--root",
+            &root,
+            "--sum",
+            "50",
+            "--count",
+            "3",
+        ]))
+        .unwrap();
+        assert_eq!(ok_count, format!("ok\naccount={b}\namount=2\n"));
+        let err = run_from_args(args(&[
+            "sum-verify",
+            p,
+            "--root",
+            &root,
+            "--sum",
+            "50",
+            "--count",
+            "4",
+        ]))
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            CliError::SumProof(crate::sum::SumProofError::CountMismatch {
+                claimed: 3,
+                expected: 4
+            })
+        ));
 
         let _ = std::fs::remove_file(&csv);
         let _ = std::fs::remove_file(&proof_path);
@@ -1236,6 +1373,39 @@ mod tests {
         ]))
         .unwrap_err();
         assert_eq!(err, CliError::AccountPresent(b));
+
+        let ok_count = run_from_args(args(&[
+            "sum-verify-absent",
+            p,
+            "--root",
+            &root,
+            "--sum",
+            "50",
+            "--count",
+            "3",
+        ]))
+        .unwrap();
+        assert_eq!(ok_count, format!("ok\naccount={missing}\nabsent\n"));
+        let err = run_from_args(args(&[
+            "sum-verify-absent",
+            p,
+            "--root",
+            &root,
+            "--sum",
+            "50",
+            "--count",
+            "4",
+        ]))
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            CliError::Absence(crate::sum::AbsenceError::Inclusion(
+                crate::sum::SumProofError::CountMismatch {
+                    claimed: 3,
+                    expected: 4
+                }
+            ))
+        ));
 
         let _ = std::fs::remove_file(&csv);
         let _ = std::fs::remove_file(&proof_path);
