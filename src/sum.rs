@@ -903,6 +903,69 @@ impl SumMultiProof {
     pub fn accounts(&self) -> Vec<AccountId> {
         self.items.iter().map(|item| item.leaf.account_id).collect()
     }
+
+    /// Shared `leaf_count` on every item, or `None` if the bundle is empty
+    /// or the items disagree.
+    pub fn leaf_count(&self) -> Option<usize> {
+        let mut counts = self.items.iter().map(|item| item.proof.leaf_count);
+        let first = counts.next()?;
+        counts.all(|count| count == first).then_some(first)
+    }
+
+    /// Verify every contained proof against the same published root.
+    ///
+    /// An empty bundle is treated as vacuously true for any root. The first
+    /// item that fails is returned; later items are not checked.
+    ///
+    /// ```
+    /// use merkle_tree::sum::{MerkleSumTree, SumLeaf};
+    ///
+    /// let leaves = [
+    ///     SumLeaf::new([1u8; 32], 40),
+    ///     SumLeaf::new([2u8; 32], 2),
+    ///     SumLeaf::new([3u8; 32], 8),
+    /// ];
+    /// let tree = MerkleSumTree::from_leaves(leaves).expect("no overflow");
+    /// let root = tree.root_node().expect("non-empty");
+    /// let multi = tree.prove_many([0, 2]).expect("in range");
+    /// assert!(multi.verify(&root).is_ok());
+    /// ```
+    pub fn verify(&self, root: &SumNode) -> Result<(), SumProofError> {
+        self.items
+            .iter()
+            .try_for_each(|item| item.proof.verify(&item.leaf, root))
+    }
+
+    /// Verify every contained proof against a published [`commit_sum_root`]
+    /// wrap for `leaf_count` accounts.
+    ///
+    /// An empty bundle is vacuously true. A proof that claims a different
+    /// tree size fails even when the bare root hash would still match.
+    ///
+    /// ```
+    /// use merkle_tree::sum::{MerkleSumTree, SumLeaf};
+    ///
+    /// let leaves = [
+    ///     SumLeaf::new([1u8; 32], 40),
+    ///     SumLeaf::new([2u8; 32], 2),
+    ///     SumLeaf::new([3u8; 32], 8),
+    /// ];
+    /// let tree = MerkleSumTree::from_leaves(leaves).expect("no overflow");
+    /// let commitment = tree.committed_root().expect("non-empty");
+    /// let multi = tree.prove_many([0, 2]).expect("in range");
+    /// assert!(multi.verify_committed(commitment, 3).is_ok());
+    /// assert!(multi.verify_committed(commitment, 4).is_err());
+    /// ```
+    pub fn verify_committed(
+        &self,
+        commitment: [u8; 32],
+        leaf_count: usize,
+    ) -> Result<(), SumProofError> {
+        self.items.iter().try_for_each(|item| {
+            item.proof
+                .verify_committed(&item.leaf, commitment, leaf_count)
+        })
+    }
 }
 
 impl core::fmt::Display for SumMultiProof {
@@ -2331,6 +2394,60 @@ mod tests {
             .prove_accounts(core::iter::empty::<AccountId>())
             .expect("empty request");
         assert!(none.is_empty());
+    }
+
+    #[test]
+    fn prove_many_verifies_against_one_root() {
+        let ls = leaves(5);
+        let tree = MerkleSumTree::from_leaves(ls.clone()).expect("fits");
+        let root = tree.root_node().expect("non-empty");
+        let commitment = tree.committed_root().expect("non-empty");
+        let multi = tree.prove_many([4, 0, 2]).expect("in range");
+        assert_eq!(multi.leaf_count(), Some(5));
+        assert_eq!(multi.verify(&root), Ok(()));
+        assert_eq!(multi.verify_committed(commitment, 5), Ok(()));
+        assert_eq!(tree.prove_all().verify(&root), Ok(()));
+
+        let empty = SumMultiProof::default();
+        assert!(empty.is_empty());
+        assert_eq!(empty.leaf_count(), None);
+        assert_eq!(empty.verify(&root), Ok(()));
+        assert_eq!(empty.verify_committed(commitment, 5), Ok(()));
+    }
+
+    #[test]
+    fn a_tampered_bundle_item_fails_verification() {
+        let ls = leaves(4);
+        let tree = MerkleSumTree::from_leaves(ls.clone()).expect("fits");
+        let root = tree.root_node().expect("non-empty");
+        let commitment = tree.committed_root().expect("non-empty");
+        let mut multi = tree.prove_many([0, 3]).expect("in range");
+        multi.items[1].leaf.amount ^= 1;
+        assert_eq!(multi.verify(&root), Err(SumProofError::HashMismatch));
+        assert_eq!(
+            multi.verify_committed(commitment, 4),
+            Err(SumProofError::CommitmentMismatch)
+        );
+
+        let mut mixed = tree.prove_many([0, 1]).expect("in range");
+        mixed.items[1].proof.leaf_count = 3;
+        assert_eq!(mixed.leaf_count(), None);
+        assert_eq!(
+            mixed.verify_committed(commitment, 4),
+            Err(SumProofError::CountMismatch {
+                claimed: 3,
+                expected: 4
+            })
+        );
+        assert_eq!(
+            tree.prove_many([0, 1])
+                .unwrap()
+                .verify_committed(commitment, 5),
+            Err(SumProofError::CountMismatch {
+                claimed: 4,
+                expected: 5
+            })
+        );
     }
 
     #[test]

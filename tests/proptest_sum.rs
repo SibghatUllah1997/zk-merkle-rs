@@ -366,6 +366,32 @@ proptest! {
     }
 
     #[test]
+    fn a_sum_multiproof_matches_the_single_paths(
+        leaves in nonempty_leaves(),
+        picks in prop::collection::vec(any::<prop::sample::Index>(), 0..=6),
+    ) {
+        let tree = MerkleSumTree::from_leaves(leaves.clone()).expect("small amounts fit");
+        let root = tree.root_node().expect("non-empty");
+        let commitment = tree.committed_root().expect("non-empty");
+        let n = leaves.len();
+        let indices: Vec<usize> = picks.iter().map(|pick| pick.index(n)).collect();
+        let multi = tree.prove_many(indices.iter().copied()).expect("in range");
+        prop_assert_eq!(multi.indices(), indices.clone());
+        prop_assert_eq!(multi.verify(&root), Ok(()));
+        prop_assert_eq!(multi.verify_committed(commitment, n), Ok(()));
+        for (item, &index) in multi.items.iter().zip(indices.iter()) {
+            prop_assert_eq!(item.leaf, leaves[index]);
+            prop_assert_eq!(item.proof.verify(&item.leaf, &root), Ok(()));
+        }
+        if !indices.is_empty() {
+            prop_assert_eq!(multi.leaf_count(), Some(n));
+            let mut lie = multi.clone();
+            lie.items[0].leaf.amount ^= 1;
+            prop_assert_eq!(lie.verify(&root), Err(SumProofError::HashMismatch));
+        }
+    }
+
+    #[test]
     fn skipped_neighbours_are_not_adjacent(leaves in distinct_sorted_leaves()) {
         prop_assume!(leaves.len() >= 3);
         let tree = MerkleSumTree::from_sorted_leaves(leaves.clone()).expect("sorted");
