@@ -1629,6 +1629,21 @@ impl NeighborSlots {
         };
         Ok(Some(SumAbsenceNeighbor { leaf, proof }))
     }
+
+    fn finish_multi_item(self) -> Result<SumMultiItem, SumProofTextError> {
+        let leaf = SumLeaf::new(
+            self.account.ok_or(SumProofTextError::Missing("account"))?,
+            self.amount.ok_or(SumProofTextError::Missing("amount"))?,
+        );
+        let proof = SumInclusionProof {
+            leaf_index: self.index.ok_or(SumProofTextError::Missing("index"))?,
+            leaf_count: self
+                .leaf_count
+                .ok_or(SumProofTextError::Missing("leaf_count"))?,
+            steps: self.steps,
+        };
+        Ok(SumMultiItem { leaf, proof })
+    }
 }
 
 /// Parse text written by [`sum_absent_to_text`].
@@ -1732,6 +1747,158 @@ pub fn parse_sum_absent_text(text: &str) -> Result<SumAbsenceProof, SumProofText
             "right.leaf_count",
         )?,
     })
+}
+
+/// Render a multi-account proof as `key=value` lines.
+///
+/// ```text
+/// kind=multi
+/// count=<n>
+/// 0.account=<64 hex>
+/// 0.amount=<decimal>
+/// 0.index=<leaf index>
+/// 0.leaf_count=<leaves in the tree>
+/// 0.step=<L|R>:<sibling hash hex>:<sibling sum>
+/// 1.account=...
+/// ```
+///
+/// Item numbers match caller order. The published root is left out on
+/// purpose, as with a single-account file.
+///
+/// ```
+/// use merkle_tree::sum::{
+///     parse_sum_multi_text, sum_multi_to_text, MerkleSumTree, SumLeaf,
+/// };
+///
+/// let leaves = [SumLeaf::new([1u8; 32], 40), SumLeaf::new([2u8; 32], 2)];
+/// let tree = MerkleSumTree::from_leaves(leaves).unwrap();
+/// let multi = tree.prove_many([1, 0]).unwrap();
+/// let text = sum_multi_to_text(&multi);
+/// let parsed = parse_sum_multi_text(&text).unwrap();
+/// assert_eq!(parsed, multi);
+/// assert!(parsed.verify(&tree.root_node().unwrap()).is_ok());
+/// ```
+pub fn sum_multi_to_text(proof: &SumMultiProof) -> String {
+    let mut out = format!("kind=multi\ncount={}\n", proof.items.len());
+    for (i, item) in proof.items.iter().enumerate() {
+        out.push_str(&format!(
+            "{i}.account={}\n{i}.amount={}\n{i}.index={}\n{i}.leaf_count={}\n",
+            to_hex32(&item.leaf.account_id),
+            item.leaf.amount,
+            item.proof.leaf_index,
+            item.proof.leaf_count,
+        ));
+        for step in &item.proof.steps {
+            out.push_str(&format!(
+                "{i}.step={}:{}:{}\n",
+                step.side.as_char(),
+                to_hex32(&step.sibling.hash),
+                step.sibling.sum
+            ));
+        }
+    }
+    out
+}
+
+fn parse_item_key(key: &str) -> Option<(usize, &str)> {
+    let (index_raw, field) = key.split_once('.')?;
+    let index = index_raw.parse::<usize>().ok()?;
+    Some((index, field))
+}
+
+/// Parse text written by [`sum_multi_to_text`].
+///
+/// Blank lines and `#` comments are skipped. Unknown keys are rejected.
+/// Parsing does not verify; call [`SumMultiProof::verify`] with the
+/// published root afterwards.
+pub fn parse_sum_multi_text(text: &str) -> Result<SumMultiProof, SumProofTextError> {
+    let mut kind = None;
+    let mut count = None;
+    let mut slots: Vec<NeighborSlots> = Vec::new();
+
+    for (idx, raw) in text.lines().enumerate() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let bad = |message: String| SumProofTextError::BadLine {
+            line: idx + 1,
+            message,
+        };
+        let (key, value) = line
+            .split_once('=')
+            .ok_or_else(|| bad(String::from("expected key=value")))?;
+        let value = value.trim();
+        let key = key.trim();
+        match key {
+            "kind" => {
+                if value != "multi" {
+                    return Err(bad(format!("expected kind=multi, got {value:?}")));
+                }
+                set_once(&mut kind, (), "kind")?;
+            }
+            "count" => {
+                let v = value
+                    .parse::<usize>()
+                    .map_err(|_| bad(format!("invalid count {value:?}")))?;
+                set_once(&mut count, v, "count")?;
+            }
+            other => {
+                let (index, field) =
+                    parse_item_key(other).ok_or_else(|| bad(format!("unknown key {other:?}")))?;
+                if index >= slots.len() {
+                    slots.resize_with(index + 1, NeighborSlots::new);
+                }
+                let slot = &mut slots[index];
+                match field {
+                    "account" => {
+                        let id = try_from_hex32(value).map_err(|err| bad(err.to_string()))?;
+                        set_once(&mut slot.account, id, "account")?;
+                    }
+                    "amount" => {
+                        let v = value
+                            .parse::<u128>()
+                            .map_err(|_| bad(format!("invalid amount {value:?}")))?;
+                        set_once(&mut slot.amount, v, "amount")?;
+                    }
+                    "index" => {
+                        let v = value
+                            .parse::<usize>()
+                            .map_err(|_| bad(format!("invalid index {value:?}")))?;
+                        set_once(&mut slot.index, v, "index")?;
+                    }
+                    "leaf_count" => {
+                        let v = value
+                            .parse::<usize>()
+                            .map_err(|_| bad(format!("invalid leaf_count {value:?}")))?;
+                        set_once(&mut slot.leaf_count, v, "leaf_count")?;
+                    }
+                    "step" => slot.steps.push(parse_sum_step(value).map_err(bad)?),
+                    _ => return Err(bad(format!("unknown key {other:?}"))),
+                }
+            }
+        }
+    }
+
+    kind.ok_or(SumProofTextError::Missing("kind"))?;
+    let claimed = count.ok_or(SumProofTextError::Missing("count"))?;
+    if slots.len() != claimed {
+        return Err(SumProofTextError::BadLine {
+            line: 1,
+            message: format!("count is {claimed}, found {} items", slots.len()),
+        });
+    }
+    let mut items = Vec::with_capacity(claimed);
+    for (i, slot) in slots.into_iter().enumerate() {
+        if slot.is_empty() {
+            return Err(SumProofTextError::BadLine {
+                line: 1,
+                message: format!("item {i} is missing"),
+            });
+        }
+        items.push(slot.finish_multi_item()?);
+    }
+    Ok(SumMultiProof { items })
 }
 
 impl MerkleSumTree {
@@ -2279,6 +2446,83 @@ mod tests {
         ));
         assert!(matches!(
             parse_sum_absent_text("kind=inclusion\naccount=00\n").unwrap_err(),
+            SumProofTextError::BadLine { .. }
+        ));
+    }
+
+    #[test]
+    fn multi_text_round_trips_and_still_verifies() {
+        let ls = [leaf(1, 40), leaf(2, 2), leaf(3, 8)];
+        let tree = MerkleSumTree::from_leaves(ls).expect("fits");
+        let root = tree.root_node().unwrap();
+        let multi = tree.prove_many([2, 0]).unwrap();
+        let text = sum_multi_to_text(&multi);
+        assert!(text.starts_with("kind=multi\ncount=2\n"));
+        assert!(text.contains("0.index=2\n"));
+        assert!(text.contains("1.index=0\n"));
+        let parsed = parse_sum_multi_text(&text).unwrap();
+        assert_eq!(parsed, multi);
+        assert_eq!(parsed.verify(&root), Ok(()));
+
+        let empty_text = sum_multi_to_text(&SumMultiProof::default());
+        assert_eq!(empty_text, "kind=multi\ncount=0\n");
+        let empty = parse_sum_multi_text(&empty_text).unwrap();
+        assert!(empty.is_empty());
+        assert_eq!(empty.verify(&root), Ok(()));
+
+        let noisy = format!("# batch\n\n{text}\n");
+        assert_eq!(parse_sum_multi_text(&noisy).unwrap(), multi);
+    }
+
+    #[test]
+    fn edited_amount_in_multi_text_fails_verification() {
+        let ls = [leaf(1, 40), leaf(2, 2), leaf(3, 8)];
+        let tree = MerkleSumTree::from_leaves(ls).expect("fits");
+        let root = tree.root_node().unwrap();
+        let text = sum_multi_to_text(&tree.prove_many([0, 1]).unwrap());
+        let edited = text.replace("1.amount=2\n", "1.amount=3\n");
+        let parsed = parse_sum_multi_text(&edited).unwrap();
+        assert_eq!(parsed.items[1].leaf.amount, 3);
+        assert_eq!(parsed.verify(&root), Err(SumProofError::HashMismatch));
+    }
+
+    #[test]
+    fn multi_text_rejects_bad_input() {
+        let ls = [leaf(1, 40), leaf(2, 2)];
+        let tree = MerkleSumTree::from_leaves(ls).expect("fits");
+        let text = sum_multi_to_text(&tree.prove_many([0, 1]).unwrap());
+        assert_eq!(
+            parse_sum_multi_text("").unwrap_err(),
+            SumProofTextError::Missing("kind")
+        );
+        assert_eq!(
+            parse_sum_multi_text("kind=multi\n").unwrap_err(),
+            SumProofTextError::Missing("count")
+        );
+        assert!(matches!(
+            parse_sum_multi_text("kind=absent\ncount=0\n").unwrap_err(),
+            SumProofTextError::BadLine { .. }
+        ));
+        assert!(matches!(
+            parse_sum_multi_text(&format!("{text}colour=blue\n")).unwrap_err(),
+            SumProofTextError::BadLine { .. }
+        ));
+        let dup_id = to_hex32(&[9u8; 32]);
+        assert_eq!(
+            parse_sum_multi_text(&format!("{text}0.account={dup_id}\n")).unwrap_err(),
+            SumProofTextError::Duplicate("account")
+        );
+        let mut without_one = String::new();
+        for line in text.lines().filter(|l| !l.starts_with("1.")) {
+            without_one.push_str(line);
+            without_one.push('\n');
+        }
+        assert!(matches!(
+            parse_sum_multi_text(&without_one).unwrap_err(),
+            SumProofTextError::BadLine { .. }
+        ));
+        assert!(matches!(
+            parse_sum_multi_text("kind=multi\ncount=1\n0.account=00\n").unwrap_err(),
             SumProofTextError::BadLine { .. }
         ));
     }
