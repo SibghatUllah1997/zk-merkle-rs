@@ -141,6 +141,7 @@ pub use sum::{
     commit_sum_root, parse_sum_absent_text, parse_sum_csv, parse_sum_proof_text,
     sum_absent_to_text, sum_proof_to_text, AbsenceError, AccountId, MerkleSumTree,
     SumAbsenceNeighbor, SumAbsenceProof, SumBuildError, SumCsvError, SumInclusionProof, SumLeaf,
-    SumNode, SumOverflow, SumProofError, SumProofStep, SumProofTextError,
+    SumMultiItem, SumMultiProof, SumNode, SumOverflow, SumProofError, SumProofStep,
+    SumProofTextError,
 };
 pub use tree::{LeafInfo, MerkleRoot, MerkleTree};

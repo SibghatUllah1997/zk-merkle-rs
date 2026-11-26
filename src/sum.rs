@@ -841,6 +841,89 @@ impl SumInclusionProof {
     }
 }
 
+/// One leaf and its inclusion path inside a [`SumMultiProof`].
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SumMultiItem {
+    /// Account and amount that were proved.
+    pub leaf: SumLeaf,
+    /// Inclusion path for [`Self::leaf`].
+    pub proof: SumInclusionProof,
+}
+
+/// Naive multi-account inclusion proof: one independent path per requested leaf.
+///
+/// Sibling hashes are not shared across accounts. Verification is exactly
+/// "every contained [`SumInclusionProof`] verifies against the same root".
+/// Overlapping paths can be compressed later without changing this type's
+/// meaning.
+///
+/// ```
+/// use merkle_tree::sum::{MerkleSumTree, SumLeaf};
+///
+/// let leaves = [
+///     SumLeaf::new([1u8; 32], 40),
+///     SumLeaf::new([2u8; 32], 2),
+///     SumLeaf::new([3u8; 32], 8),
+/// ];
+/// let tree = MerkleSumTree::from_leaves(leaves).expect("no overflow");
+/// let multi = tree.prove_many([0, 2]).expect("in range");
+/// assert_eq!(multi.indices(), vec![0, 2]);
+/// assert_eq!(multi.len(), 2);
+/// assert_eq!(multi.items[0].leaf, leaves[0]);
+/// assert_eq!(multi.items[0].proof, tree.prove(0).unwrap());
+/// ```
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SumMultiProof {
+    /// Per-account proofs, in the order the caller requested them.
+    pub items: Vec<SumMultiItem>,
+}
+
+impl SumMultiProof {
+    /// Number of single-account proofs in this bundle.
+    pub fn len(&self) -> usize {
+        self.items.len()
+    }
+
+    /// `true` when no accounts were requested.
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+
+    /// Leaf indices covered by this bundle, in caller order.
+    pub fn indices(&self) -> Vec<usize> {
+        self.items
+            .iter()
+            .map(|item| item.proof.leaf_index)
+            .collect()
+    }
+
+    /// Account ids covered by this bundle, in caller order.
+    pub fn accounts(&self) -> Vec<AccountId> {
+        self.items.iter().map(|item| item.leaf.account_id).collect()
+    }
+}
+
+impl core::fmt::Display for SumMultiProof {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "count={}, items=[", self.items.len())?;
+        for (i, item) in self.items.iter().enumerate() {
+            if i > 0 {
+                write!(f, "; ")?;
+            }
+            write!(
+                f,
+                "index={}, account={}, amount={}",
+                item.proof.leaf_index,
+                to_hex32(&item.leaf.account_id),
+                item.leaf.amount
+            )?;
+        }
+        write!(f, "]")
+    }
+}
+
 /// One neighbouring leaf used in a [`SumAbsenceProof`].
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1139,6 +1222,62 @@ impl MerkleSumTree {
                 })
             }
         }
+    }
+
+    /// Bundle independent inclusion proofs for `indices`, in caller order.
+    ///
+    /// Returns `None` if any index is out of range. Duplicates are kept, so
+    /// the same account can appear twice if the caller asked twice. An empty
+    /// index list yields an empty [`SumMultiProof`], including on an empty
+    /// tree.
+    ///
+    /// ```
+    /// use merkle_tree::sum::{MerkleSumTree, SumLeaf};
+    ///
+    /// let tree = MerkleSumTree::from_leaves([
+    ///     SumLeaf::new([1u8; 32], 40),
+    ///     SumLeaf::new([2u8; 32], 2),
+    ///     SumLeaf::new([3u8; 32], 8),
+    /// ])
+    /// .expect("no overflow");
+    /// let multi = tree.prove_many([2, 0, 2]).expect("in range");
+    /// assert_eq!(multi.indices(), vec![2, 0, 2]);
+    /// assert!(tree.prove_many([0, 99]).is_none());
+    /// ```
+    pub fn prove_many<I>(&self, indices: I) -> Option<SumMultiProof>
+    where
+        I: IntoIterator<Item = usize>,
+    {
+        let mut items = Vec::new();
+        for index in indices {
+            items.push(SumMultiItem {
+                leaf: *self.leaves.get(index)?,
+                proof: self.prove(index)?,
+            });
+        }
+        Some(SumMultiProof { items })
+    }
+
+    /// Bundle a proof for every leaf, in index order.
+    ///
+    /// Always succeeds: an empty tree yields an empty bundle.
+    pub fn prove_all(&self) -> SumMultiProof {
+        self.prove_many(0..self.len()).unwrap_or_default()
+    }
+
+    /// Bundle inclusion proofs for the given account ids, in caller order.
+    ///
+    /// Returns `None` if any id is missing from the tree. The first matching
+    /// leaf is used for a repeated id, matching [`Self::position`].
+    pub fn prove_accounts<I>(&self, accounts: I) -> Option<SumMultiProof>
+    where
+        I: IntoIterator<Item = AccountId>,
+    {
+        let mut indices = Vec::new();
+        for account in accounts {
+            indices.push(self.position(&account)?);
+        }
+        self.prove_many(indices)
     }
 }
 
@@ -2113,6 +2252,85 @@ mod tests {
             }
             assert_eq!(tree.prove(ls.len()), None);
         }
+    }
+
+    #[test]
+    fn prove_many_preserves_order_and_duplicates() {
+        let ls = leaves(4);
+        let tree = MerkleSumTree::from_leaves(ls.clone()).expect("fits");
+        let multi = tree.prove_many([2, 0, 2]).expect("in range");
+        assert_eq!(multi.len(), 3);
+        assert_eq!(multi.indices(), vec![2, 0, 2]);
+        assert_eq!(
+            multi.accounts(),
+            vec![ls[2].account_id, ls[0].account_id, ls[2].account_id]
+        );
+        assert_eq!(multi.items[0].leaf, ls[2]);
+        assert_eq!(multi.items[0].proof, tree.prove(2).unwrap());
+        assert_eq!(multi.items[1].proof, tree.prove(0).unwrap());
+        assert_eq!(multi.items[2].proof, tree.prove(2).unwrap());
+        assert!(tree.prove_many([0, 99]).is_none());
+        assert!(tree.prove_many([4]).is_none());
+        let shown = multi.to_string();
+        assert!(shown.starts_with("count=3, items=["));
+        assert!(shown.contains("index=2"));
+        assert!(shown.contains("index=0"));
+    }
+
+    #[test]
+    fn prove_many_empty_request_and_empty_tree() {
+        let empty = MerkleSumTree::from_leaves([]).expect("empty");
+        let none = empty
+            .prove_many(core::iter::empty::<usize>())
+            .expect("empty request");
+        assert!(none.is_empty());
+        assert_eq!(none.indices(), Vec::<usize>::new());
+        assert!(empty.prove_many([0]).is_none());
+        assert!(empty.prove_all().is_empty());
+
+        let tree = MerkleSumTree::from_leaves(leaves(3)).expect("fits");
+        let none = tree
+            .prove_many(core::iter::empty::<usize>())
+            .expect("empty request");
+        assert!(none.is_empty());
+        assert_eq!(none.to_string(), "count=0, items=[]");
+    }
+
+    #[test]
+    fn prove_many_matches_individual_proofs_for_odd_trees() {
+        let ls = leaves(5);
+        let tree = MerkleSumTree::from_leaves(ls.clone()).expect("fits");
+        let multi = tree.prove_many([0, 4, 2]).expect("in range");
+        assert_eq!(multi.len(), 3);
+        for (item, &index) in multi.items.iter().zip([0, 4, 2].iter()) {
+            assert_eq!(item.leaf, ls[index]);
+            assert_eq!(item.proof, tree.prove(index).unwrap());
+        }
+        let all = tree.prove_all();
+        assert_eq!(all.len(), 5);
+        assert_eq!(all.indices(), vec![0, 1, 2, 3, 4]);
+        for (i, item) in all.items.iter().enumerate() {
+            assert_eq!(item.leaf, ls[i]);
+            assert_eq!(item.proof, tree.prove(i).unwrap());
+        }
+    }
+
+    #[test]
+    fn prove_accounts_looks_up_ids_in_caller_order() {
+        let ls = [leaf(1, 40), leaf(2, 2), leaf(3, 8)];
+        let tree = MerkleSumTree::from_leaves(ls).expect("fits");
+        let multi = tree
+            .prove_accounts([[3u8; 32], [1u8; 32]])
+            .expect("present");
+        assert_eq!(multi.indices(), vec![2, 0]);
+        assert_eq!(multi.items[0].leaf, ls[2]);
+        assert_eq!(multi.items[1].leaf, ls[0]);
+        assert!(tree.prove_accounts([[9u8; 32]]).is_none());
+        assert!(tree.prove_accounts([[1u8; 32], [9u8; 32]]).is_none());
+        let none = tree
+            .prove_accounts(core::iter::empty::<AccountId>())
+            .expect("empty request");
+        assert!(none.is_empty());
     }
 
     #[test]
