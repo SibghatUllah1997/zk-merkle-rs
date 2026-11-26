@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-26
+
+- `prove_many` bundles independent sum-tree inclusion proofs for several accounts, in the order they were asked for
+- The bundle checks every path against the same published root and committed wrap, so one edited amount still fails
+- `merkle sum-prove-many` / `sum-verify-many` export and check that file as `key=value` lines
+
 ## 2026-11-25
 
 - `commit_sum_root` wraps the published `(hash, total)` with the leaf count under a new `0x32` tag

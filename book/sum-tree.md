@@ -238,6 +238,38 @@ and says whether the hash, the total, or the leaf count did not match.
 The proof file does not carry the root. The user should pass the root and
 total the exchange published, so a proof file cannot vouch for itself.
 
+## Several accounts at once
+
+`MerkleSumTree::prove_many(indices)` returns a `SumMultiProof`: one
+independent inclusion path per requested leaf, in caller order. Sibling
+hashes are not shared yet. `verify` and `verify_committed` check every
+item against the same published root (or count wrap). An empty bundle is
+vacuously true. `prove_accounts` looks ids up with `position` first.
+
+```rust
+# #[cfg(feature = "merkle_sum")]
+# {
+use merkle_tree::sum::{MerkleSumTree, SumLeaf};
+
+let leaves = [
+    SumLeaf::new([1u8; 32], 40),
+    SumLeaf::new([2u8; 32], 2),
+    SumLeaf::new([3u8; 32], 8),
+];
+let tree = MerkleSumTree::from_leaves(leaves).expect("no overflow");
+let root = tree.root_node().expect("non-empty");
+let multi = tree.prove_many([0, 2]).expect("in range");
+assert!(multi.verify(&root).is_ok());
+assert!(multi.verify_committed(tree.committed_root().unwrap(), 3).is_ok());
+# }
+```
+
+`sum_multi_to_text` / `parse_sum_multi_text` write the same `key=value`
+format the CLI uses (`kind=multi`, then `0.account=...`, `1.account=...`).
+`merkle sum-prove-many <file> --account <hex> [--account <hex>]...` prints
+that file; `sum-verify-many` checks it against the published root and
+total. `--count` binds every path with `commit_sum_root`.
+
 ## Range proofs
 
 `u128` already rules out negative amounts in the leaf encoding. The `zk-range`

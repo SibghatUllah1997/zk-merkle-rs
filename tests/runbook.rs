@@ -15,6 +15,8 @@ fn runbook_names_the_cli_commands() {
         "sum-build",
         "sum-prove",
         "sum-verify",
+        "sum-prove-many",
+        "sum-verify-many",
         "sum-absent",
         "sum-verify-absent",
         "solvency",

@@ -4,6 +4,7 @@ The `merkle` binary is a small demo of the library. It needs the default
 `std` feature. Sum-tree commands also need `merkle_sum`. The commands are
 `merkle build`, `merkle prove`, `merkle verify`, and with `merkle_sum`,
 `merkle sum-build`, `merkle sum-prove`, `merkle sum-verify`,
+`merkle sum-prove-many`, `merkle sum-verify-many`,
 `merkle sum-absent`, `merkle sum-verify-absent`, and `merkle solvency`.
 
 ```bash
@@ -96,6 +97,23 @@ cargo run --features merkle_sum --bin merkle -- sum-verify proof.txt --root <hex
 Pass the root and total the exchange published. `--count` also checks the
 committed wrap printed by `sum-build`. Prints `ok` with the account and
 amount, or exits 1 and says whether the hash, the total, or the count failed.
+
+## Export several accounts at once
+
+```bash
+cargo run --features merkle_sum --bin merkle -- sum-prove-many balances.csv --account <id-hex> --account <id-hex>
+```
+
+Prints `kind=multi` plus one numbered inclusion proof per account, in the
+order the flags were given. Redirect that to a file. An unknown id exits 1.
+
+```bash
+cargo run --features merkle_sum --bin merkle -- sum-verify-many multi.txt --root <hex> --sum <total>
+cargo run --features merkle_sum --bin merkle -- sum-verify-many multi.txt --root <hex> --sum <total> --count <n>
+```
+
+Prints `ok` with `count` and each account/amount, or exits 1 if any path
+fails. `--count` checks every item against the committed wrap.
 
 ## Prove an account id is missing
 

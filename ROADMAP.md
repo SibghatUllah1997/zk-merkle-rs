@@ -82,4 +82,4 @@ A bundle of independent inclusion proofs against the same published root
 (and the same count wrap) is enough, without sharing siblings yet.
 
 51. [x] Add `prove_many` that bundles independent sum-tree inclusion proofs for several accounts
-52. [ ] Verify the bundle against the same committed root, and export/import it as text plus a CLI
+52. [x] Verify the bundle against the same committed root, and export/import it as text plus a CLI
