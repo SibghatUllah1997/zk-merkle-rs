@@ -53,6 +53,19 @@ pub enum Command {
         /// When set, also bind neighbour proofs to this leaf count.
         count: Option<usize>,
     },
+    /// Export independent inclusion proofs for several accounts.
+    SumProveMany {
+        path: String,
+        accounts: Vec<[u8; 32]>,
+    },
+    /// Check an exported multi-account proof against a published root and total.
+    SumVerifyMany {
+        path: String,
+        root: [u8; 32],
+        sum: u128,
+        /// When set, also bind every path to this leaf count.
+        count: Option<usize>,
+    },
     /// Compare a published root and total with a liabilities snapshot CSV.
     Solvency {
         path: String,
@@ -200,6 +213,8 @@ pub fn usage() -> &'static str {
         "    merkle sum-verify <proof-file> --root <hex> --sum <total> [--count <n>]\n",
         "    merkle sum-absent <csv-file> --account <hex>\n",
         "    merkle sum-verify-absent <proof-file> --root <hex> --sum <total> [--count <n>]\n",
+        "    merkle sum-prove-many <csv-file> --account <hex> [--account <hex>]...\n",
+        "    merkle sum-verify-many <proof-file> --root <hex> --sum <total> [--count <n>]\n",
         "    merkle solvency <csv-file> --root <hex> --sum <total> [--reserves <amount>]\n",
         "    merkle help\n\n",
         "Leaves are UTF-8 strings. Proof steps are comma-separated L:/R: hex tokens.\n",
@@ -207,6 +222,7 @@ pub fn usage() -> &'static str {
         "sum-prove prints a proof file for one account; sum-verify checks it against the published root and sum.\n",
         "sum-build also prints count and committed, a wrap of (hash, total, leaf count). Pass --count to check it.\n",
         "sum-absent prints a non-inclusion proof for a missing id in a strictly sorted CSV; sum-verify-absent checks it.\n",
+        "sum-prove-many prints independent proofs for several accounts; sum-verify-many checks that bundle against one root.\n",
         "solvency rebuilds the tree from your own liabilities CSV and compares it with the published root and sum."
     )
 }
@@ -232,6 +248,8 @@ where
         "sum-verify" => parse_sum_verify(args),
         "sum-absent" => parse_sum_absent(args),
         "sum-verify-absent" => parse_sum_verify_absent(args),
+        "sum-prove-many" => parse_sum_prove_many(args),
+        "sum-verify-many" => parse_sum_verify_many(args),
         "solvency" => parse_solvency(args),
         other => Err(CliError::UnknownCommand(String::from(other))),
     }
@@ -544,6 +562,80 @@ where
     })
 }
 
+fn parse_sum_prove_many<I, S>(args: I) -> Result<Command, CliError>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let mut path = None;
+    let mut accounts = Vec::new();
+    let mut args = args.into_iter();
+    while let Some(arg) = args.next() {
+        let arg = arg.as_ref();
+        if arg == "-h" || arg == "--help" {
+            return Ok(Command::Help);
+        }
+        if arg == "--account" {
+            let value = args.next().ok_or(CliError::MissingValue("--account"))?;
+            accounts.push(crate::try_from_hex32(value.as_ref()).map_err(CliError::Hex)?);
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--account=") {
+            accounts.push(crate::try_from_hex32(value).map_err(CliError::Hex)?);
+            continue;
+        }
+        if arg == "--file" {
+            let value = args.next().ok_or(CliError::MissingValue("--file"))?;
+            path = Some(String::from(value.as_ref()));
+            continue;
+        }
+        if arg.starts_with('-') {
+            return Err(CliError::UnknownFlag(String::from(arg)));
+        }
+        if path.is_some() {
+            return Err(CliError::Usage(format!(
+                "unexpected argument {arg:?}; sum-prove-many takes one file"
+            )));
+        }
+        path = Some(String::from(arg));
+    }
+    let path = path.ok_or(CliError::MissingValue("<file>"))?;
+    if accounts.is_empty() {
+        return Err(CliError::MissingValue("--account"));
+    }
+    Ok(Command::SumProveMany { path, accounts })
+}
+
+fn parse_sum_verify_many<I, S>(args: I) -> Result<Command, CliError>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let (path, values) =
+        match parse_file_and_flags(args, "sum-verify-many", &["--root", "--sum", "--count"])? {
+            None => return Ok(Command::Help),
+            Some(parsed) => parsed,
+        };
+    let root = parse_root(
+        values[0]
+            .as_deref()
+            .ok_or(CliError::MissingValue("--root"))?,
+    )?;
+    let raw_sum = values[1]
+        .as_deref()
+        .ok_or(CliError::MissingValue("--sum"))?;
+    let sum = raw_sum
+        .parse::<u128>()
+        .map_err(|_| CliError::InvalidSum(String::from(raw_sum)))?;
+    let count = values[2].as_deref().map(parse_count).transpose()?;
+    Ok(Command::SumVerifyMany {
+        path,
+        root,
+        sum,
+        count,
+    })
+}
+
 fn parse_amount(raw: &str) -> Result<u128, CliError> {
     raw.parse::<u128>()
         .map_err(|_| CliError::InvalidSum(String::from(raw)))
@@ -614,6 +706,13 @@ pub fn run(command: Command) -> Result<String, CliError> {
             sum,
             count,
         } => run_sum_verify_absent(&path, root, sum, count),
+        Command::SumProveMany { path, accounts } => run_sum_prove_many(&path, &accounts),
+        Command::SumVerifyMany {
+            path,
+            root,
+            sum,
+            count,
+        } => run_sum_verify_many(&path, root, sum, count),
         Command::Solvency {
             path,
             root,
@@ -812,6 +911,67 @@ fn run_sum_verify_absent(
             "ok\naccount={}\nabsent\n",
             crate::to_hex32(&proof.query)
         ))
+    }
+}
+
+fn run_sum_prove_many(path: &str, accounts: &[[u8; 32]]) -> Result<String, CliError> {
+    #[cfg(not(feature = "merkle_sum"))]
+    {
+        let _ = (path, accounts);
+        Err(needs_merkle_sum("sum-prove-many"))
+    }
+    #[cfg(feature = "merkle_sum")]
+    {
+        use crate::sum::{parse_sum_csv, sum_multi_to_text, MerkleSumTree};
+
+        let leaves = parse_sum_csv(&read_file(path)?).map_err(CliError::SumCsv)?;
+        let tree = MerkleSumTree::from_leaves(leaves).map_err(CliError::SumOverflow)?;
+        let mut indices = Vec::with_capacity(accounts.len());
+        for account in accounts {
+            let index = tree
+                .position(account)
+                .ok_or_else(|| CliError::AccountNotFound(crate::to_hex32(account)))?;
+            indices.push(index);
+        }
+        let multi = tree.prove_many(indices).expect("positions are in range");
+        Ok(sum_multi_to_text(&multi))
+    }
+}
+
+fn run_sum_verify_many(
+    path: &str,
+    root: [u8; 32],
+    sum: u128,
+    count: Option<usize>,
+) -> Result<String, CliError> {
+    #[cfg(not(feature = "merkle_sum"))]
+    {
+        let _ = (path, root, sum, count);
+        Err(needs_merkle_sum("sum-verify-many"))
+    }
+    #[cfg(feature = "merkle_sum")]
+    {
+        use crate::sum::{commit_sum_root, parse_sum_multi_text, SumNode};
+
+        let proof = parse_sum_multi_text(&read_file(path)?).map_err(CliError::SumProofText)?;
+        let published = SumNode::new(root, sum);
+        if let Some(count) = count {
+            let commitment = commit_sum_root(&published, count as u64);
+            proof
+                .verify_committed(commitment, count)
+                .map_err(CliError::SumProof)?;
+        } else {
+            proof.verify(&published).map_err(CliError::SumProof)?;
+        }
+        let mut out = format!("ok\ncount={}\n", proof.len());
+        for item in &proof.items {
+            out.push_str(&format!(
+                "account={}\namount={}\n",
+                crate::to_hex32(&item.leaf.account_id),
+                item.leaf.amount
+            ));
+        }
+        Ok(out)
     }
 }
 
@@ -1213,6 +1373,58 @@ mod tests {
             parse_args(args(&["sum-verify", "--help"])).unwrap(),
             Command::Help
         );
+        let id_b = to_hex32(&[8u8; 32]);
+        assert_eq!(
+            parse_args(args(&[
+                "sum-prove-many",
+                "b.csv",
+                "--account",
+                &id,
+                "--account",
+                &id_b
+            ]))
+            .unwrap(),
+            Command::SumProveMany {
+                path: String::from("b.csv"),
+                accounts: vec![[7u8; 32], [8u8; 32]],
+            }
+        );
+        assert_eq!(
+            parse_args(args(&[
+                "sum-prove-many",
+                &format!("--account={id}"),
+                "b.csv",
+                &format!("--account={id_b}"),
+            ]))
+            .unwrap(),
+            Command::SumProveMany {
+                path: String::from("b.csv"),
+                accounts: vec![[7u8; 32], [8u8; 32]],
+            }
+        );
+        assert!(matches!(
+            parse_args(args(&["sum-prove-many", "b.csv"])).unwrap_err(),
+            CliError::MissingValue("--account")
+        ));
+        assert_eq!(
+            parse_args(args(&[
+                "sum-verify-many",
+                "p.txt",
+                "--root",
+                &root,
+                "--sum",
+                "50",
+                "--count",
+                "3"
+            ]))
+            .unwrap(),
+            Command::SumVerifyMany {
+                path: String::from("p.txt"),
+                root: [8u8; 32],
+                sum: 50,
+                count: Some(3),
+            }
+        );
         assert_eq!(
             parse_args(args(&["sum-absent", "b.csv", "--account", &id])).unwrap(),
             Command::SumAbsent {
@@ -1411,6 +1623,102 @@ mod tests {
         let _ = std::fs::remove_file(&proof_path);
     }
 
+    #[cfg(feature = "merkle_sum")]
+    #[test]
+    fn sum_prove_many_then_verify_many_round_trips_through_files() {
+        let dir = std::env::temp_dir();
+        let csv = dir.join("zk-merkle-unit-sum-prove-many.csv");
+        let proof_path = dir.join("zk-merkle-unit-sum-prove-many.txt");
+        let (a, b, c) = (
+            to_hex32(&[1u8; 32]),
+            to_hex32(&[2u8; 32]),
+            to_hex32(&[3u8; 32]),
+        );
+        std::fs::write(&csv, format!("account_id,amount\n{a},40\n{b},2\n{c},8\n")).unwrap();
+
+        let built = run_from_args(args(&["sum-build", csv.to_str().unwrap()])).unwrap();
+        let root = built
+            .lines()
+            .next()
+            .unwrap()
+            .trim_start_matches("root=")
+            .to_string();
+        let proof = run_from_args(args(&[
+            "sum-prove-many",
+            csv.to_str().unwrap(),
+            "--account",
+            &c,
+            "--account",
+            &a,
+        ]))
+        .unwrap();
+        assert!(proof.starts_with("kind=multi\ncount=2\n"));
+        assert!(proof.contains(&format!("0.account={c}\n0.amount=8\n0.index=2\n")));
+        assert!(proof.contains(&format!("1.account={a}\n1.amount=40\n1.index=0\n")));
+        std::fs::write(&proof_path, &proof).unwrap();
+
+        let p = proof_path.to_str().unwrap();
+        let ok = run_from_args(args(&[
+            "sum-verify-many",
+            p,
+            "--root",
+            &root,
+            "--sum",
+            "50",
+        ]))
+        .unwrap();
+        assert_eq!(
+            ok,
+            format!("ok\ncount=2\naccount={c}\namount=8\naccount={a}\namount=40\n")
+        );
+
+        let ok_count = run_from_args(args(&[
+            "sum-verify-many",
+            p,
+            "--root",
+            &root,
+            "--sum",
+            "50",
+            "--count",
+            "3",
+        ]))
+        .unwrap();
+        assert_eq!(ok_count, ok);
+        let err = run_from_args(args(&[
+            "sum-verify-many",
+            p,
+            "--root",
+            &root,
+            "--sum",
+            "50",
+            "--count",
+            "4",
+        ]))
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            CliError::SumProof(crate::sum::SumProofError::CountMismatch {
+                claimed: 3,
+                expected: 4
+            })
+        ));
+
+        let missing = to_hex32(&[9u8; 32]);
+        let err = run_from_args(args(&[
+            "sum-prove-many",
+            csv.to_str().unwrap(),
+            "--account",
+            &b,
+            "--account",
+            &missing,
+        ]))
+        .unwrap_err();
+        assert_eq!(err, CliError::AccountNotFound(missing));
+
+        let _ = std::fs::remove_file(&csv);
+        let _ = std::fs::remove_file(&proof_path);
+    }
+
     #[cfg(not(feature = "merkle_sum"))]
     #[test]
     fn sum_prove_and_verify_explain_the_feature() {
@@ -1424,6 +1732,18 @@ mod tests {
         assert!(err.to_string().contains("merkle_sum"));
         let err = run_from_args(args(&[
             "sum-verify-absent",
+            "p.txt",
+            "--root",
+            &id,
+            "--sum",
+            "1",
+        ]))
+        .unwrap_err();
+        assert!(err.to_string().contains("merkle_sum"));
+        let err = run_from_args(args(&["sum-prove-many", "x.csv", "--account", &id])).unwrap_err();
+        assert!(err.to_string().contains("merkle_sum"));
+        let err = run_from_args(args(&[
+            "sum-verify-many",
             "p.txt",
             "--root",
             &id,

@@ -202,6 +202,8 @@ fn help_mentions_sum_prove_and_verify() {
     assert!(text.contains("merkle sum-verify"));
     assert!(text.contains("merkle sum-absent"));
     assert!(text.contains("merkle sum-verify-absent"));
+    assert!(text.contains("merkle sum-prove-many"));
+    assert!(text.contains("merkle sum-verify-many"));
 }
 
 #[test]
@@ -255,6 +257,58 @@ fn sum_absent_then_verify_absent_via_the_binary() {
     let printed = String::from_utf8(ok.stdout).unwrap();
     assert!(printed.contains("absent"));
     assert!(printed.contains(&missing));
+}
+
+#[test]
+fn sum_prove_many_exports_a_bundle_that_sum_verify_many_accepts() {
+    let csv = write_balances("zk-merkle-cli-sum-prove-many.csv");
+    let proof_path = std::env::temp_dir().join("zk-merkle-cli-sum-prove-many.txt");
+    let first = to_hex32(&[5u8; 32]);
+    let second = to_hex32(&[1u8; 32]);
+
+    let out = merkle()
+        .args(["sum-prove-many", csv.to_str().unwrap()])
+        .args(["--account", &first, "--account", &second])
+        .output()
+        .expect("run merkle");
+    assert!(
+        out.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    std::fs::write(&proof_path, &out.stdout).expect("write proof");
+
+    let tree =
+        MerkleSumTree::from_leaves((1u8..=5).map(|i| SumLeaf::new([i; 32], u128::from(i) * 100)))
+            .unwrap();
+    let (hash, total) = tree.root().unwrap();
+    let root = to_hex32(&hash);
+
+    let ok = merkle()
+        .args(["sum-verify-many", proof_path.to_str().unwrap()])
+        .args(["--root", &root, "--sum", &total.to_string(), "--count", "5"])
+        .output()
+        .expect("run merkle");
+    assert!(
+        ok.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&ok.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(ok.stdout).unwrap(),
+        format!("ok\ncount=2\naccount={first}\namount=500\naccount={second}\namount=100\n")
+    );
+
+    let missing = to_hex32(&[9u8; 32]);
+    let bad = merkle()
+        .args(["sum-prove-many", csv.to_str().unwrap()])
+        .args(["--account", &first, "--account", &missing])
+        .output()
+        .expect("run merkle");
+    let _ = std::fs::remove_file(&csv);
+    let _ = std::fs::remove_file(&proof_path);
+    assert_eq!(bad.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&bad.stderr).contains("is not in the CSV"));
 }
 
 /// Root and total that `sum-build` prints for `write_balances` (sum 1500).
